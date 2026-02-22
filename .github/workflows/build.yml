@@ -7,14 +7,12 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # NDK build takes longer — extend timeout to 45 minutes
     timeout-minutes: 45
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          # Need full history for submodules
           submodules: false
 
       - name: Set up JDK 17
@@ -32,28 +30,30 @@ jobs:
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;27.2.12479018"
           echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> $GITHUB_ENV
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> $GITHUB_ENV
-          echo "✅ NDK r27b installed"
 
       - name: Install CMake
         run: |
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "cmake;3.22.1"
-          echo "✅ CMake 3.22.1 installed"
 
       - name: Cache llama.cpp source
         uses: actions/cache@v4
         id: llama-cache
         with:
           path: app/src/main/cpp/llama_src
-          key: llama-cpp-b5752
+          key: llama-cpp-depth1-v2
 
       - name: Clone llama.cpp if not cached
         if: steps.llama-cache.outputs.cache-hit != 'true'
         run: |
-          echo "Cloning llama.cpp at commit b5752..."
           git clone https://github.com/ggerganov/llama.cpp.git \
             app/src/main/cpp/llama_src --depth=1
-          cd app/src/main/cpp/llama_src
           echo "✅ llama.cpp cloned"
+
+      - name: Grep llama.h for KV cache function names
+        run: |
+          echo "=== KV cache functions in llama.h ==="
+          grep -i "llama_kv" app/src/main/cpp/llama_src/include/llama.h | grep -v "//"
+          echo "==================================="
 
       - name: Cache Gradle
         uses: actions/cache@v4
@@ -69,7 +69,6 @@ jobs:
           VERSION=$(grep versionName app/build.gradle.kts | \
             sed "s/.*versionName = \"//;s/\".*//")
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Building Aigentik v$VERSION with llama.cpp NDK"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v3
@@ -85,10 +84,9 @@ jobs:
       - name: Verify APK contains native library
         run: |
           APK=app/build/outputs/apk/debug/app-debug.apk
-          echo "Checking APK for native library..."
           unzip -l $APK | grep "libaigentik_llama.so" && \
-            echo "✅ Native library found in APK" || \
-            echo "⚠️ Native library NOT found — check CMake config"
+            echo "✅ Native library found" || \
+            echo "⚠️ Native library NOT found"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
