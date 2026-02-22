@@ -118,7 +118,7 @@ object MessageEngine {
                 }
 
                 "status" -> {
-                    val healthy = AiEngine.checkHealth()
+                    val healthy = AiEngine.isReady()
                     ownerNotifier?.invoke(
                         "✅ $agentName Status:\n" +
                         "🤖 AI: ${if (healthy) "online" else "offline"}\n" +

@@ -2,86 +2,74 @@ package com.aigentik.app.ai
 
 import android.util.Log
 
-// LlamaJNI v0.9.1 — Kotlin interface to llama.cpp via JNI
-// All functions are native — implemented in llama_jni.cpp
-// NOTE: Never call from main thread — always use Dispatchers.IO
+// LlamaJNI v0.9.1 fix — native functions prefixed with "native"
+// to avoid Kotlin overload conflicts with public wrapper functions
 class LlamaJNI {
 
     companion object {
         private const val TAG = "LlamaJNI"
-        private const val DEFAULT_CONTEXT_SIZE = 2048
+        private const val DEFAULT_CTX = 2048
 
-        // Load the native library
-        // NOTE: Library name matches add_library name in CMakeLists.txt
+        @Volatile private var instance: LlamaJNI? = null
+
+        fun getInstance(): LlamaJNI = instance ?: synchronized(this) {
+            instance ?: LlamaJNI().also { instance = it }
+        }
+
         init {
             try {
                 System.loadLibrary("aigentik_llama")
-                Log.i(TAG, "Native library loaded successfully")
+                Log.i(TAG, "Native library loaded")
             } catch (e: UnsatisfiedLinkError) {
-                Log.e(TAG, "Failed to load native library: ${e.message}")
-                Log.e(TAG, "AI features will not be available")
-            }
-        }
-
-        // Singleton instance
-        @Volatile
-        private var instance: LlamaJNI? = null
-
-        fun getInstance(): LlamaJNI {
-            return instance ?: synchronized(this) {
-                instance ?: LlamaJNI().also { instance = it }
+                Log.e(TAG, "Native library load failed: ${e.message}")
             }
         }
     }
 
-    // Check if native library is available
-    fun isNativeAvailable(): Boolean {
+    // Public API — called by AiEngine
+    fun loadModel(path: String, nCtx: Int = DEFAULT_CTX): Boolean {
         return try {
-            isLoaded() // Will throw if library not loaded
-            true
+            nativeLoadModel(path, nCtx)
         } catch (e: UnsatisfiedLinkError) {
+            Log.e(TAG, "loadModel JNI error: ${e.message}")
             false
         }
     }
 
-    // Load model — returns true on success
-    // modelPath: absolute path to .gguf file
-    // nCtx: context window size (2048 recommended for SMS/email)
-    fun loadModel(
-        modelPath: String,
-        nCtx: Int = DEFAULT_CONTEXT_SIZE
-    ): Boolean {
-        Log.i(TAG, "Loading model: $modelPath (ctx=$nCtx)")
-        return try {
-            loadModel(modelPath, nCtx)
-        } catch (e: Exception) {
-            Log.e(TAG, "loadModel exception: ${e.message}")
-            false
-        }
-    }
-
-    // Generate text from prompt
     fun generate(prompt: String, maxTokens: Int = 256): String {
         return try {
-            generate(prompt, maxTokens)
-        } catch (e: Exception) {
-            Log.e(TAG, "generate exception: ${e.message}")
+            nativeGenerate(prompt, maxTokens)
+        } catch (e: UnsatisfiedLinkError) {
+            Log.e(TAG, "generate JNI error: ${e.message}")
             ""
         }
     }
 
-    // Build chat prompt in Qwen3 format
-    // Qwen3 uses ChatML format: <|im_start|>role\ncontent<|im_end|>
-    fun buildChatPrompt(systemMsg: String, userMsg: String): String {
-        return "<|im_start|>system\n$systemMsg<|im_end|>\n" +
-               "<|im_start|>user\n$userMsg<|im_end|>\n" +
-               "<|im_start|>assistant\n"
+    fun isLoaded(): Boolean {
+        return try { nativeIsLoaded() }
+        catch (e: UnsatisfiedLinkError) { false }
     }
 
-    // Native function declarations — implemented in llama_jni.cpp
-    private external fun loadModel(path: String, nCtx: Int): Boolean
-    external fun generate(prompt: String, maxTokens: Int): String
-    external fun isLoaded(): Boolean
-    external fun unloadModel()
-    external fun getModelInfo(): String
+    fun unload() {
+        try { nativeUnload() }
+        catch (e: UnsatisfiedLinkError) { Log.e(TAG, "unload JNI error") }
+    }
+
+    fun getModelInfo(): String {
+        return try { nativeGetModelInfo() }
+        catch (e: UnsatisfiedLinkError) { "Native library not available" }
+    }
+
+    // Build Qwen3 ChatML format prompt
+    fun buildChatPrompt(systemMsg: String, userMsg: String): String =
+        "<|im_start|>system\n$systemMsg<|im_end|>\n" +
+        "<|im_start|>user\n$userMsg<|im_end|>\n" +
+        "<|im_start|>assistant\n"
+
+    // Native declarations — names match JNI function names in llama_jni.cpp
+    private external fun nativeLoadModel(path: String, nCtx: Int): Boolean
+    private external fun nativeGenerate(prompt: String, maxTokens: Int): String
+    private external fun nativeIsLoaded(): Boolean
+    private external fun nativeUnload()
+    private external fun nativeGetModelInfo(): String
 }
