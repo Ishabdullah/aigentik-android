@@ -29,7 +29,7 @@ class OnboardingActivity : AppCompatActivity() {
 
         // NOTE: The start button ID comes from activity_onboarding.xml
         // Layout was created in v0.7 with id btnStart
-        val btnStart = findViewById<Button>(R.id.btnStart)
+        val btnStart = findViewById<Button>(R.id.btnSetup)
             ?: run {
                 // Fallback — find any button in layout
                 findViewById<Button>(android.R.id.button1)
