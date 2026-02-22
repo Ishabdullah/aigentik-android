@@ -11,8 +11,8 @@ android {
         applicationId = "com.aigentik.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 10
-        versionName = "0.9.1"
+        versionCode = 11
+        versionName = "0.9.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // Only build for ARM64 — S24 Ultra is arm64-v8a

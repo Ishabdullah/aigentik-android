@@ -59,6 +59,10 @@ object AigentikSettings {
         get() = prefs.getBoolean(KEY_AUTO_REPLY, true)
         set(value) = prefs.edit().putBoolean(KEY_AUTO_REPLY, value).apply()
 
+    var modelPath: String
+        get() = prefs.getString("model_path", "") ?: ""
+        set(v) = prefs.edit().putString("model_path", v).apply()
+
     var isPaused: Boolean
         get() = prefs.getBoolean(KEY_PAUSED, false)
         set(value) = prefs.edit().putBoolean(KEY_PAUSED, value).apply()

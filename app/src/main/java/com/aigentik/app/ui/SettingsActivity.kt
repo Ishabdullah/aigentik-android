@@ -59,6 +59,11 @@ class SettingsActivity : AppCompatActivity() {
             tvStatus.text = "✅ Settings saved — restart app to apply"
         }
 
+        val btnManageModel = findViewById<Button>(R.id.btnManageModel)
+        btnManageModel.setOnClickListener {
+            startActivity(Intent(this, ModelManagerActivity::class.java))
+        }
+
         btnReset.setOnClickListener {
             AigentikSettings.isConfigured = false
             startActivity(Intent(this, OnboardingActivity::class.java))

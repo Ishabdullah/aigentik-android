@@ -77,6 +77,15 @@ class AigentikService : Service() {
                     }
                 )
 
+                // Auto-load AI model if previously configured
+                val modelPath = AigentikSettings.modelPath
+                if (modelPath.isNotEmpty() && java.io.File(modelPath).exists()) {
+                    Log.i(TAG, "Auto-loading model: $modelPath")
+                    AiEngine.loadModel(modelPath)
+                } else {
+                    Log.w(TAG, "No model configured 2014 using fallback replies")
+                }
+
                 // Start Gmail monitoring
                 EmailMonitor.start()
 

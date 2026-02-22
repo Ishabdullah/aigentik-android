@@ -131,6 +131,14 @@
             android:layout_gravity="center"
             android:layout_marginBottom="16dp"/>
 
+        <Button android:id="@+id/btnManageModel"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="🧠 Manage AI Model"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#222222"
+            android:layout_marginBottom="8dp"/>
+
         <Button android:id="@+id/btnResetSetup"
             android:layout_width="match_parent"
             android:layout_height="48dp"

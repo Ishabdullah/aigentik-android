@@ -35,6 +35,9 @@
         <activity android:name=".ui.OnboardingActivity"
             android:exported="false" android:label="Setup Aigentik"/>
 
+        <activity android:name=".ui.ModelManagerActivity"
+            android:exported="false" android:label="AI Model"/>
+
         <activity android:name=".ui.SettingsActivity"
             android:exported="false" android:label="Settings"/>
 

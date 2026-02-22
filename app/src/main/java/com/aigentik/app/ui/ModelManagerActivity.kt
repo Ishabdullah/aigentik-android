@@ -1,0 +1,335 @@
+package com.aigentik.app.ui
+
+import android.app.Activity
+import android.content.Intent
+import android.net.Uri
+import android.os.Bundle
+import android.os.Environment
+import android.util.Log
+import android.view.View
+import android.widget.Button
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.ProgressBar
+import android.widget.TextView
+import androidx.appcompat.app.AppCompatActivity
+import com.aigentik.app.R
+import com.aigentik.app.ai.AiEngine
+import com.aigentik.app.core.AigentikSettings
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
+
+// ModelManagerActivity v0.9.2
+// Handles model download from URL or loading from local file
+// Can be launched from onboarding (showSkip=true) or settings (showSkip=false)
+// NOTE: Downloads saved to app private storage — survives app updates
+// NOTE: Large models (2.5GB) require stable WiFi — warn user if on mobile data
+class ModelManagerActivity : AppCompatActivity() {
+
+    companion object {
+        private const val TAG = "ModelManager"
+        const val EXTRA_SHOW_SKIP = "show_skip"
+        const val EXTRA_FROM_ONBOARDING = "from_onboarding"
+
+        // Pre-filled Qwen3-4B Q4_K_M URL — official Qwen repo
+        const val DEFAULT_MODEL_URL =
+            "https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf"
+
+        private const val FILE_PICKER_REQUEST = 200
+    }
+
+    private val scope = CoroutineScope(Dispatchers.Main)
+    private var downloadJob: Job? = null
+    private var isCancelled = false
+
+    // Models stored in app private files dir — not deleted on update
+    private val modelsDir: File by lazy {
+        File(filesDir, "models").also { it.mkdirs() }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        AigentikSettings.init(this)
+        setContentView(R.layout.activity_model_manager)
+
+        val showSkip = intent.getBooleanExtra(EXTRA_SHOW_SKIP, false)
+
+        // Pre-fill URL
+        findViewById<EditText>(R.id.etDownloadUrl).setText(DEFAULT_MODEL_URL)
+
+        // Show skip button only during onboarding
+        val btnSkip = findViewById<Button>(R.id.btnSkip)
+        btnSkip.visibility = if (showSkip) View.VISIBLE else View.GONE
+        btnSkip.setOnClickListener { finishAndProceed() }
+
+        // Update status with current model if loaded
+        updateCurrentModelCard()
+
+        // Download button
+        findViewById<Button>(R.id.btnDownload).setOnClickListener {
+            val url = findViewById<EditText>(R.id.etDownloadUrl).text.toString().trim()
+            if (url.isEmpty() || !url.startsWith("http")) {
+                showStatus("⚠️ Enter a valid URL starting with https://")
+                return@setOnClickListener
+            }
+            startDownload(url)
+        }
+
+        // Browse for local file
+        findViewById<Button>(R.id.btnBrowse).setOnClickListener {
+            val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                type = "*/*"
+                addCategory(Intent.CATEGORY_OPENABLE)
+            }
+            startActivityForResult(intent, FILE_PICKER_REQUEST)
+        }
+
+        // Load from local path
+        findViewById<Button>(R.id.btnLoadLocal).setOnClickListener {
+            val path = findViewById<EditText>(R.id.etLocalPath).text.toString().trim()
+            if (path.isEmpty()) {
+                showStatus("⚠️ Enter a file path or use Browse")
+                return@setOnClickListener
+            }
+            loadLocalFile(path)
+        }
+
+        // Cancel download
+        findViewById<Button>(R.id.btnCancel).setOnClickListener {
+            isCancelled = true
+            downloadJob?.cancel()
+            showStatus("Download cancelled")
+            hideProgress()
+        }
+    }
+
+    private fun startDownload(urlStr: String) {
+        isCancelled = false
+        val fileName = urlStr.substringAfterLast("/").ifEmpty { "model.gguf" }
+        val destFile = File(modelsDir, fileName)
+
+        showProgress()
+        showStatus("Starting download of $fileName...")
+        Log.i(TAG, "Downloading: $urlStr → ${destFile.absolutePath}")
+
+        downloadJob = scope.launch {
+            val success = withContext(Dispatchers.IO) {
+                downloadFile(urlStr, destFile)
+            }
+
+            if (success && !isCancelled) {
+                showStatus("✅ Download complete — loading model...")
+                loadModelFile(destFile.absolutePath)
+            } else if (!isCancelled) {
+                showStatus("❌ Download failed — check URL and connection")
+                hideProgress()
+            }
+        }
+    }
+
+    private suspend fun downloadFile(urlStr: String, destFile: File): Boolean {
+        return try {
+            val url = URL(urlStr)
+            val conn = url.openConnection() as HttpURLConnection
+            conn.connectTimeout = 15_000
+            conn.readTimeout = 30_000
+            conn.connect()
+
+            val totalBytes = conn.contentLengthLong
+            var downloadedBytes = 0L
+            var lastSpeedUpdate = System.currentTimeMillis()
+            var lastBytes = 0L
+
+            val buffer = ByteArray(8192)
+            conn.inputStream.use { input ->
+                FileOutputStream(destFile).use { output ->
+                    var bytesRead: Int
+                    while (input.read(buffer).also { bytesRead = it } != -1) {
+                        if (isCancelled) {
+                            destFile.delete()
+                            return false
+                        }
+                        output.write(buffer, 0, bytesRead)
+                        downloadedBytes += bytesRead
+
+                        // Update UI every 500ms
+                        val now = System.currentTimeMillis()
+                        if (now - lastSpeedUpdate > 500) {
+                            val speed = (downloadedBytes - lastBytes) * 2 // bytes/sec
+                            val speedMb = speed / 1_048_576.0
+                            val downloadedMb = downloadedBytes / 1_048_576.0
+                            val totalMb = if (totalBytes > 0) totalBytes / 1_048_576.0 else 0.0
+                            val pct = if (totalBytes > 0)
+                                (downloadedBytes * 100 / totalBytes).toInt() else 0
+
+                            val eta = if (speed > 0 && totalBytes > 0) {
+                                val remaining = (totalBytes - downloadedBytes) / speed
+                                "${remaining}s remaining"
+                            } else "calculating..."
+
+                            withContext(Dispatchers.Main) {
+                                updateProgress(pct,
+                                    "%.1f MB / %.1f MB — %.1f MB/s — $eta"
+                                        .format(downloadedMb, totalMb, speedMb))
+                            }
+                            lastSpeedUpdate = now
+                            lastBytes = downloadedBytes
+                        }
+                    }
+                }
+            }
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Download error: ${e.message}")
+            destFile.delete()
+            false
+        }
+    }
+
+    private fun loadLocalFile(path: String) {
+        val file = File(path)
+        if (!file.exists()) {
+            showStatus("❌ File not found: $path")
+            return
+        }
+        if (!path.endsWith(".gguf")) {
+            showStatus("⚠️ File must be a .gguf model file")
+            return
+        }
+
+        // If file is not already in models dir, copy it
+        val destFile = File(modelsDir, file.name)
+        if (file.absolutePath != destFile.absolutePath) {
+            showStatus("Copying model to app storage...")
+            showProgress()
+            scope.launch {
+                withContext(Dispatchers.IO) {
+                    file.copyTo(destFile, overwrite = true)
+                }
+                loadModelFile(destFile.absolutePath)
+            }
+        } else {
+            scope.launch { loadModelFile(path) }
+        }
+    }
+
+    private suspend fun loadModelFile(path: String) {
+        showStatus("Loading model — this takes 15-30 seconds...")
+        Log.i(TAG, "Loading model: $path")
+
+        val success = AiEngine.loadModel(path)
+
+        if (success) {
+            // Save model path to settings
+            AigentikSettings.modelPath = path
+            updateCurrentModelCard()
+            showStatus("✅ Model loaded! ${AiEngine.getModelInfo()}")
+            hideProgress()
+
+            // Auto-proceed after 2 seconds if from onboarding
+            if (intent.getBooleanExtra(EXTRA_FROM_ONBOARDING, false)) {
+                kotlinx.coroutines.delay(2000)
+                finishAndProceed()
+            }
+        } else {
+            showStatus("❌ Failed to load model — file may be corrupt")
+            hideProgress()
+        }
+    }
+
+    private fun updateCurrentModelCard() {
+        val card = findViewById<LinearLayout>(R.id.cardCurrentModel)
+        val tvStatus = findViewById<TextView>(R.id.tvModelStatus)
+
+        if (AiEngine.isReady()) {
+            card.visibility = View.VISIBLE
+            val path = AigentikSettings.modelPath
+            val name = File(path).name
+            findViewById<TextView>(R.id.tvLoadedModel).text = name
+            findViewById<TextView>(R.id.tvModelInfo).text = AiEngine.getModelInfo()
+            tvStatus.text = "✅ Model ready"
+            tvStatus.setTextColor(0xFF00FF88.toInt())
+        } else {
+            card.visibility = View.GONE
+            tvStatus.text = "No model loaded — AI will use fallback replies"
+            tvStatus.setTextColor(0xFF888888.toInt())
+        }
+    }
+
+    private fun showProgress() {
+        findViewById<LinearLayout>(R.id.layoutProgress).visibility = View.VISIBLE
+        findViewById<Button>(R.id.btnDownload).isEnabled = false
+        findViewById<Button>(R.id.btnLoadLocal).isEnabled = false
+    }
+
+    private fun hideProgress() {
+        findViewById<LinearLayout>(R.id.layoutProgress).visibility = View.GONE
+        findViewById<Button>(R.id.btnDownload).isEnabled = true
+        findViewById<Button>(R.id.btnLoadLocal).isEnabled = true
+    }
+
+    private fun updateProgress(pct: Int, statusText: String) {
+        findViewById<ProgressBar>(R.id.progressDownload).progress = pct
+        findViewById<TextView>(R.id.tvDownloadStatus).text = statusText
+    }
+
+    private fun showStatus(msg: String) {
+        findViewById<TextView>(R.id.tvModelStatus).text = msg
+    }
+
+    private fun finishAndProceed() {
+        if (intent.getBooleanExtra(EXTRA_FROM_ONBOARDING, false)) {
+            startActivity(Intent(this, MainActivity::class.java))
+            finishAffinity()
+        } else {
+            finish()
+        }
+    }
+
+    // Handle file picker result
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == FILE_PICKER_REQUEST && resultCode == Activity.RESULT_OK) {
+            val uri: Uri = data?.data ?: return
+            val path = getRealPath(uri)
+            if (path != null) {
+                findViewById<EditText>(R.id.etLocalPath).setText(path)
+            } else {
+                showStatus("⚠️ Could not read file path — paste it manually")
+            }
+        }
+    }
+
+    // Get real file path from URI
+    // NOTE: Works for file:// URIs and most content:// from file managers
+    private fun getRealPath(uri: Uri): String? {
+        return try {
+            if (uri.scheme == "file") {
+                uri.path
+            } else {
+                // Try to get path from content URI
+                contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val idx = cursor.getColumnIndex("_data")
+                        if (idx >= 0) cursor.getString(idx) else null
+                    } else null
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "getRealPath failed: ${e.message}")
+            null
+        }
+    }
+
+    override fun onDestroy() {
+        downloadJob?.cancel()
+        super.onDestroy()
+    }
+}
