@@ -3,6 +3,7 @@ package com.aigentik.app.ui
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.widget.Button
 import android.widget.EditText
@@ -26,26 +27,33 @@ class OnboardingActivity : AppCompatActivity() {
         AigentikSettings.init(this)
         setContentView(R.layout.activity_onboarding)
 
+        // NOTE: The start button ID comes from activity_onboarding.xml
+        // Layout was created in v0.7 with id btnStart
         val btnStart = findViewById<Button>(R.id.btnStart)
+            ?: run {
+                // Fallback — find any button in layout
+                findViewById<Button>(android.R.id.button1)
+            }
+
         val tvStatus = findViewById<TextView>(R.id.tvStatus)
 
-        btnStart.setOnClickListener {
-            val agentName = findViewById<EditText>(R.id.etAgentName)
-                .text.toString().trim().ifEmpty { "Aigentik" }
-            val ownerName = findViewById<EditText>(R.id.etOwnerName)
-                .text.toString().trim()
-            val adminNumber = findViewById<EditText>(R.id.etAdminNumber)
-                .text.toString().trim()
-            val aigentikNumber = findViewById<EditText>(R.id.etAigentikNumber)
-                .text.toString().trim()
-            val gmail = findViewById<EditText>(R.id.etGmailAddress)
-                .text.toString().trim()
-            val password = findViewById<EditText>(R.id.etAppPassword)
-                .text.toString().trim()
+        btnStart?.setOnClickListener {
+            val agentName = (findViewById<EditText>(R.id.etAgentName)
+                ?.text?.toString()?.trim()).orEmpty().ifEmpty { "Aigentik" }
+            val ownerName = (findViewById<EditText>(R.id.etOwnerName)
+                ?.text?.toString()?.trim()).orEmpty()
+            val adminNumber = (findViewById<EditText>(R.id.etAdminNumber)
+                ?.text?.toString()?.trim()).orEmpty()
+            val aigentikNumber = (findViewById<EditText>(R.id.etAigentikNumber)
+                ?.text?.toString()?.trim()).orEmpty()
+            val gmail = (findViewById<EditText>(R.id.etGmailAddress)
+                ?.text?.toString()?.trim()).orEmpty()
+            val password = (findViewById<EditText>(R.id.etAppPassword)
+                ?.text?.toString()?.trim()).orEmpty()
 
             if (ownerName.isEmpty() || adminNumber.isEmpty() || gmail.isEmpty()) {
-                tvStatus.setTextColor(0xFFFF4444.toInt())
-                tvStatus.text = "Your name, phone number, and Gmail are required"
+                tvStatus?.setTextColor(0xFFFF4444.toInt())
+                tvStatus?.text = "Your name, phone number, and Gmail are required"
                 return@setOnClickListener
             }
 
@@ -54,20 +62,23 @@ class OnboardingActivity : AppCompatActivity() {
                 aigentikNumber, gmail, password
             )
 
-            tvStatus.setTextColor(0xFF00FF88.toInt())
-            tvStatus.text = "✅ Saved — requesting storage permission..."
+            tvStatus?.setTextColor(0xFF00FF88.toInt())
+            tvStatus?.text = "✅ Saved — requesting storage permission..."
 
-            // Request storage permission before model download
             requestStoragePermission()
         }
     }
 
     private fun requestStoragePermission() {
-        val permission = Manifest.permission.READ_EXTERNAL_STORAGE
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            // Android 13+ — no READ_EXTERNAL_STORAGE needed for file picker
+        // Android 13+ uses granular media permissions — no READ_EXTERNAL_STORAGE needed
+        // File picker works without it on API 33+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             launchModelManager()
-        } else if (ContextCompat.checkSelfPermission(this, permission)
+            return
+        }
+
+        val permission = Manifest.permission.READ_EXTERNAL_STORAGE
+        if (ContextCompat.checkSelfPermission(this, permission)
             == PackageManager.PERMISSION_GRANTED) {
             launchModelManager()
         } else {
@@ -83,7 +94,7 @@ class OnboardingActivity : AppCompatActivity() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        // Proceed regardless of result — model can still be downloaded via URL
+        // Proceed regardless — model can still download via URL without storage permission
         if (requestCode == STORAGE_PERMISSION_CODE) launchModelManager()
     }
 

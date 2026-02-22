@@ -9,24 +9,24 @@ import androidx.appcompat.app.AppCompatActivity
 import com.aigentik.app.R
 import com.aigentik.app.core.AigentikSettings
 
-// SettingsActivity v0.8 — edit config without reinstalling
+// SettingsActivity v0.9.2 — includes AI Model manager button
 class SettingsActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
-
         AigentikSettings.init(this)
 
-        val etAgentName = findViewById<EditText>(R.id.etAgentName)
-        val etOwnerName = findViewById<EditText>(R.id.etOwnerName)
-        val etAdminNumber = findViewById<EditText>(R.id.etAdminNumber)
+        val etAgentName     = findViewById<EditText>(R.id.etAgentName)
+        val etOwnerName     = findViewById<EditText>(R.id.etOwnerName)
+        val etAdminNumber   = findViewById<EditText>(R.id.etAdminNumber)
         val etAigentikNumber = findViewById<EditText>(R.id.etAigentikNumber)
-        val etGmailAddress = findViewById<EditText>(R.id.etGmailAddress)
-        val etAppPassword = findViewById<EditText>(R.id.etAppPassword)
-        val btnSave = findViewById<Button>(R.id.btnSave)
-        val btnReset = findViewById<Button>(R.id.btnResetSetup)
-        val tvStatus = findViewById<TextView>(R.id.tvSaveStatus)
+        val etGmailAddress  = findViewById<EditText>(R.id.etGmailAddress)
+        val etAppPassword   = findViewById<EditText>(R.id.etAppPassword)
+        val btnSave         = findViewById<Button>(R.id.btnSave)
+        val btnReset        = findViewById<Button>(R.id.btnResetSetup)
+        val btnManageModel  = findViewById<Button>(R.id.btnManageModel)
+        val tvStatus        = findViewById<TextView>(R.id.tvSaveStatus)
 
         // Load current values
         etAgentName.setText(AigentikSettings.agentName)
@@ -37,12 +37,12 @@ class SettingsActivity : AppCompatActivity() {
         etAppPassword.setText(AigentikSettings.gmailAppPassword)
 
         btnSave.setOnClickListener {
-            val agentName = etAgentName.text.toString().trim().ifEmpty { "Aigentik" }
-            val ownerName = etOwnerName.text.toString().trim()
-            val adminNumber = etAdminNumber.text.toString().trim()
-            val aigentikNumber = etAigentikNumber.text.toString().trim()
-            val gmail = etGmailAddress.text.toString().trim()
-            val password = etAppPassword.text.toString().trim()
+            val agentName    = etAgentName.text.toString().trim().ifEmpty { "Aigentik" }
+            val ownerName    = etOwnerName.text.toString().trim()
+            val adminNumber  = etAdminNumber.text.toString().trim()
+            val aigentikNum  = etAigentikNumber.text.toString().trim()
+            val gmail        = etGmailAddress.text.toString().trim()
+            val password     = etAppPassword.text.toString().trim()
 
             if (ownerName.isEmpty() || adminNumber.isEmpty() || gmail.isEmpty()) {
                 tvStatus.setTextColor(0xFFFF4444.toInt())
@@ -51,16 +51,13 @@ class SettingsActivity : AppCompatActivity() {
             }
 
             AigentikSettings.saveFromOnboarding(
-                agentName, ownerName, adminNumber,
-                aigentikNumber, gmail, password
+                agentName, ownerName, adminNumber, aigentikNum, gmail, password
             )
-
             tvStatus.setTextColor(0xFF00FF88.toInt())
             tvStatus.text = "✅ Settings saved — restart app to apply"
         }
 
-        val btnManageModel = findViewById<Button>(R.id.btnManageModel)
-        btnManageModel.setOnClickListener {
+        btnManageModel?.setOnClickListener {
             startActivity(Intent(this, ModelManagerActivity::class.java))
         }
 
