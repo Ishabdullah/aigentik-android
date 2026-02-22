@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.widget.Button
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -11,8 +12,13 @@ import androidx.core.content.ContextCompat
 import com.aigentik.app.R
 import com.aigentik.app.core.AigentikService
 import com.aigentik.app.core.AigentikSettings
+import com.aigentik.app.core.ContactEngine
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
-// MainActivity v0.7 — checks onboarding, requests permissions, starts service
+// MainActivity v0.8 — full dashboard
 class MainActivity : AppCompatActivity() {
 
     companion object {
@@ -25,38 +31,104 @@ class MainActivity : AppCompatActivity() {
         private const val PERMISSION_REQUEST_CODE = 100
     }
 
+    private val scope = CoroutineScope(Dispatchers.Main)
+    private val activityLog = mutableListOf<String>()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
 
         AigentikSettings.init(this)
 
-        // First launch — go to onboarding
         if (!AigentikSettings.isConfigured) {
             startActivity(Intent(this, OnboardingActivity::class.java))
             finish()
             return
         }
 
-        val agentName = AigentikSettings.agentName
-        val tvStatus = findViewById<TextView>(R.id.tvStatus)
-        val tvVersion = findViewById<TextView>(R.id.tvVersion)
-        tvVersion.text = "v0.7"
+        setContentView(R.layout.activity_main)
+        setupDashboard()
+        checkPermissionsAndStart()
+    }
 
-        // Check and request permissions
+    private fun setupDashboard() {
+        val agentName = AigentikSettings.agentName
+        val tvAppName = findViewById<TextView>(R.id.tvAppName)
+        val tvVersion = findViewById<TextView>(R.id.tvVersion)
+        val btnPause = findViewById<Button>(R.id.btnPause)
+        val btnSettings = findViewById<Button>(R.id.btnSettings)
+        val btnSyncContacts = findViewById<Button>(R.id.btnSyncContacts)
+
+        tvAppName.text = "🤖 $agentName"
+        tvVersion.text = "v0.8"
+
+        // Update contact count
+        updateStats()
+
+        btnPause.setOnClickListener {
+            val paused = AigentikSettings.isPaused
+            AigentikSettings.isPaused = !paused
+            btnPause.text = if (!paused) "▶️ Resume Aigentik" else "⏸ Pause Aigentik"
+            addActivity(if (!paused) "⏸ $agentName paused" else "▶️ $agentName resumed")
+        }
+
+        btnSettings.setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
+
+        btnSyncContacts.setOnClickListener {
+            addActivity("🔄 Syncing contacts...")
+            scope.launch {
+                val added = ContactEngine.syncAndroidContacts(this@MainActivity)
+                updateStats()
+                addActivity("✅ Sync done — $added new contacts added")
+            }
+        }
+
+        // Start polling UI updates
+        scope.launch {
+            while (true) {
+                updateStats()
+                delay(10000)
+            }
+        }
+    }
+
+    private fun updateStats() {
+        try {
+            val tvContactCount = findViewById<TextView>(R.id.tvContactCount)
+            val tvStatus = findViewById<TextView>(R.id.tvStatus)
+            val tvGmailStatus = findViewById<TextView>(R.id.tvGmailStatus)
+
+            tvContactCount.text = ContactEngine.getCount().toString()
+
+            val paused = AigentikSettings.isPaused
+            tvStatus.text = if (paused) "⏸ Paused" else "✅ ${AigentikSettings.agentName} Active"
+            tvStatus.setTextColor(if (paused) 0xFFFFAA00.toInt() else 0xFF00FF88.toInt())
+            tvGmailStatus.text = "📧 Gmail: ${AigentikSettings.gmailAddress}"
+        } catch (e: Exception) { }
+    }
+
+    private fun addActivity(entry: String) {
+        val time = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US)
+            .format(java.util.Date())
+        activityLog.add(0, "[$time] $entry")
+        if (activityLog.size > 10) activityLog.removeAt(activityLog.size - 1)
+        try {
+            val tvLog = findViewById<TextView>(R.id.tvActivityLog)
+            tvLog.text = activityLog.joinToString("\n")
+        } catch (e: Exception) { }
+    }
+
+    private fun checkPermissionsAndStart() {
         val missing = REQUIRED_PERMISSIONS.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
-
         if (missing.isNotEmpty()) {
-            tvStatus.text = "Requesting permissions..."
             ActivityCompat.requestPermissions(
-                this,
-                missing.toTypedArray(),
-                PERMISSION_REQUEST_CODE
+                this, missing.toTypedArray(), PERMISSION_REQUEST_CODE
             )
         } else {
-            startAigentik(agentName)
+            startAigentik()
         }
     }
 
@@ -66,23 +138,12 @@ class MainActivity : AppCompatActivity() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == PERMISSION_REQUEST_CODE) {
-            val agentName = AigentikSettings.agentName
-            val allGranted = grantResults.all { it == PackageManager.PERMISSION_GRANTED }
-            val tvStatus = findViewById<TextView>(R.id.tvStatus)
-            if (allGranted) {
-                startAigentik(agentName)
-            } else {
-                tvStatus.text = "⚠️ Some permissions denied.\n$agentName may have limited functionality."
-                startAigentik(agentName)
-            }
-        }
+        if (requestCode == PERMISSION_REQUEST_CODE) startAigentik()
     }
 
-    private fun startAigentik(agentName: String) {
-        val tvStatus = findViewById<TextView>(R.id.tvStatus)
-        tvStatus.text = "Starting $agentName..."
+    private fun startAigentik() {
         startForegroundService(Intent(this, AigentikService::class.java))
-        tvStatus.text = "✅ $agentName is running\n\nMonitoring Gmail + Google Voice"
+        addActivity("🚀 ${AigentikSettings.agentName} started")
+        updateStats()
     }
 }

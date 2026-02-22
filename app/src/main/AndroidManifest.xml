@@ -22,28 +22,25 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Aigentik">
 
-        <activity
-            android:name=".ui.MainActivity"
-            android:exported="true"
-            android:label="@string/app_name">
+        <activity android:name=".ui.MainActivity"
+            android:exported="true" android:label="@string/app_name">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".ui.OnboardingActivity"
-            android:exported="false"
-            android:label="Setup Aigentik"/>
+        <activity android:name=".ui.OnboardingActivity"
+            android:exported="false" android:label="Setup Aigentik"/>
 
-        <service
-            android:name=".core.AigentikService"
+        <activity android:name=".ui.SettingsActivity"
+            android:exported="false" android:label="Settings"/>
+
+        <service android:name=".core.AigentikService"
             android:exported="false"
             android:foregroundServiceType="dataSync"/>
 
-        <service
-            android:name=".adapters.NotificationAdapter"
+        <service android:name=".adapters.NotificationAdapter"
             android:exported="true"
             android:label="Aigentik Message Listener"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
@@ -55,8 +52,7 @@
                 android:resource="@xml/notification_listener"/>
         </service>
 
-        <receiver
-            android:name=".adapters.SmsAdapter"
+        <receiver android:name=".adapters.SmsAdapter"
             android:exported="true"
             android:permission="android.permission.BROADCAST_SMS">
             <intent-filter android:priority="999">
