@@ -40,7 +40,7 @@ jobs:
         id: llama-cache
         with:
           path: app/src/main/cpp/llama_src
-          key: llama-cpp-depth1-v2
+          key: llama-cpp-depth1-v3
 
       - name: Clone llama.cpp if not cached
         if: steps.llama-cache.outputs.cache-hit != 'true'

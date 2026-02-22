@@ -119,7 +119,7 @@ Java_com_aigentik_app_ai_LlamaJNI_nativeGenerate(
     }
 
     // Clear KV cache for next call — new function name
-    llama_kv_self_clear(g_ctx);
+
 
     LOGI("Generated %zu chars", result.size());
     return env->NewStringUTF(result.c_str());
