@@ -1,0 +1,206 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0A0A0A">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="🤖 Welcome to Aigentik"
+            android:textSize="26sp"
+            android:textColor="#00FF88"
+            android:layout_gravity="center"
+            android:layout_marginBottom="8dp"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Let's get you set up"
+            android:textSize="14sp"
+            android:textColor="#888888"
+            android:layout_gravity="center"
+            android:layout_marginBottom="32dp"/>
+
+        <!-- Agent Name -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="AI Assistant Name"
+            android:textColor="#CCCCCC"
+            android:textSize="13sp"
+            android:layout_marginBottom="4dp"/>
+
+        <EditText
+            android:id="@+id/etAgentName"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="e.g. Aigentik"
+            android:text="Aigentik"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#555555"
+            android:background="@drawable/input_background"
+            android:padding="12dp"
+            android:layout_marginBottom="16dp"
+            android:inputType="text"/>
+
+        <!-- Owner Name -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Your Name"
+            android:textColor="#CCCCCC"
+            android:textSize="13sp"
+            android:layout_marginBottom="4dp"/>
+
+        <EditText
+            android:id="@+id/etOwnerName"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="e.g. Ish"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#555555"
+            android:background="@drawable/input_background"
+            android:padding="12dp"
+            android:layout_marginBottom="16dp"
+            android:inputType="text"/>
+
+        <!-- Your Phone Number (Admin) -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Your Phone Number (Admin)"
+            android:textColor="#CCCCCC"
+            android:textSize="13sp"
+            android:layout_marginBottom="4dp"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="This is YOUR number — used to identify your commands"
+            android:textColor="#666666"
+            android:textSize="11sp"
+            android:layout_marginBottom="4dp"/>
+
+        <EditText
+            android:id="@+id/etAdminNumber"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="e.g. 8602669332"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#555555"
+            android:background="@drawable/input_background"
+            android:padding="12dp"
+            android:layout_marginBottom="16dp"
+            android:inputType="phone"/>
+
+        <!-- Aigentik Number (Google Voice) -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Aigentik's Google Voice Number"
+            android:textColor="#CCCCCC"
+            android:textSize="13sp"
+            android:layout_marginBottom="4dp"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="The number people text to reach Aigentik"
+            android:textColor="#666666"
+            android:textSize="11sp"
+            android:layout_marginBottom="4dp"/>
+
+        <EditText
+            android:id="@+id/etAigentikNumber"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="e.g. 8604706773"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#555555"
+            android:background="@drawable/input_background"
+            android:padding="12dp"
+            android:layout_marginBottom="16dp"
+            android:inputType="phone"/>
+
+        <!-- Gmail Address -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Gmail Address"
+            android:textColor="#CCCCCC"
+            android:textSize="13sp"
+            android:layout_marginBottom="4dp"/>
+
+        <EditText
+            android:id="@+id/etGmailAddress"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="your@gmail.com"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#555555"
+            android:background="@drawable/input_background"
+            android:padding="12dp"
+            android:layout_marginBottom="16dp"
+            android:inputType="textEmailAddress"/>
+
+        <!-- Gmail App Password -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Gmail App Password"
+            android:textColor="#CCCCCC"
+            android:textSize="13sp"
+            android:layout_marginBottom="4dp"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Generate at myaccount.google.com → Security → App Passwords"
+            android:textColor="#666666"
+            android:textSize="11sp"
+            android:layout_marginBottom="4dp"/>
+
+        <EditText
+            android:id="@+id/etAppPassword"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="xxxx xxxx xxxx xxxx"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#555555"
+            android:background="@drawable/input_background"
+            android:padding="12dp"
+            android:layout_marginBottom="32dp"
+            android:inputType="textPassword"/>
+
+        <!-- Setup Button -->
+        <Button
+            android:id="@+id/btnSetup"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:text="Start Aigentik"
+            android:textSize="16sp"
+            android:textColor="#000000"
+            android:backgroundTint="#00FF88"
+            android:layout_marginBottom="16dp"/>
+
+        <!-- Status text -->
+        <TextView
+            android:id="@+id/tvSetupStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textColor="#FF4444"
+            android:textSize="13sp"
+            android:layout_gravity="center"
+            android:layout_marginBottom="32dp"/>
+
+    </LinearLayout>
+</ScrollView>

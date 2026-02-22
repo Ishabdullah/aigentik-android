@@ -1,27 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- SMS permissions -->
     <uses-permission android:name="android.permission.RECEIVE_SMS"/>
     <uses-permission android:name="android.permission.READ_SMS"/>
     <uses-permission android:name="android.permission.SEND_SMS"/>
-
-    <!-- Network -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
-
-    <!-- Contacts -->
     <uses-permission android:name="android.permission.READ_CONTACTS"/>
-
-    <!-- Foreground service -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-
-    <!-- Wake lock to keep AI processing alive -->
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
-
-    <!-- Storage for model files -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32"/>
 
@@ -33,7 +22,6 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Aigentik">
 
-        <!-- Main Activity -->
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"
@@ -44,13 +32,16 @@
             </intent-filter>
         </activity>
 
-        <!-- Foreground Service -->
+        <activity
+            android:name=".ui.OnboardingActivity"
+            android:exported="false"
+            android:label="Setup Aigentik"/>
+
         <service
             android:name=".core.AigentikService"
             android:exported="false"
             android:foregroundServiceType="dataSync"/>
 
-        <!-- Notification Listener for RCS -->
         <service
             android:name=".adapters.NotificationAdapter"
             android:exported="true"
@@ -64,7 +55,6 @@
                 android:resource="@xml/notification_listener"/>
         </service>
 
-        <!-- SMS Receiver -->
         <receiver
             android:name=".adapters.SmsAdapter"
             android:exported="true"

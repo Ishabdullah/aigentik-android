@@ -17,64 +17,62 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-// AigentikService v0.6 — full engine + email wired
+// AigentikService v0.7 — reads all config from AigentikSettings
 class AigentikService : Service() {
 
     companion object {
         const val CHANNEL_ID = "aigentik_service_channel"
         const val NOTIFICATION_ID = 1001
         private const val TAG = "AigentikService"
-
-        // NOTE: Load from SharedPreferences in v0.9
-        // Temporary hardcoded config — replaced by onboarding
-        private const val GMAIL_ADDRESS = "ismail.t.abdullah@gmail.com"
-        private const val GMAIL_APP_PASSWORD = "YOUR_APP_PASSWORD_HERE"
-        private const val ADMIN_NUMBER = "8602669332"
-        private const val OWNER_NAME = "Ish"
-        private const val AGENT_NAME = "Aigentik"
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     override fun onCreate() {
         super.onCreate()
+        AigentikSettings.init(this)
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification("Aigentik starting..."))
+        startForeground(
+            NOTIFICATION_ID,
+            buildNotification("${AigentikSettings.agentName} starting...")
+        )
         initAllEngines()
     }
 
     private fun initAllEngines() {
         scope.launch {
-            // Init contact and rule engines
+            val agentName = AigentikSettings.agentName
+            val ownerName = AigentikSettings.ownerName
+            val adminNumber = AigentikSettings.adminNumber
+            val gmail = AigentikSettings.gmailAddress
+            val password = AigentikSettings.gmailAppPassword
+
+            // Init engines
             ContactEngine.init(this@AigentikService)
             RuleEngine.init(this@AigentikService)
 
             // Configure Gmail
-            GmailClient.configure(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
+            GmailClient.configure(gmail, password)
 
-            // Configure MessageEngine with email reply callbacks
+            // Configure MessageEngine
             MessageEngine.configure(
-                adminNumber = ADMIN_NUMBER,
-                ownerName = OWNER_NAME,
-                agentName = AGENT_NAME,
+                adminNumber = adminNumber,
+                ownerName = ownerName,
+                agentName = agentName,
                 replySender = { number, body ->
-                    // Route reply through Google Voice email
                     EmailRouter.replyViaGVoice(number, body)
                 },
                 ownerNotifier = { message ->
-                    // Notify owner via Gmail
                     EmailRouter.notifyOwner(message)
                     updateNotification(message.take(80))
                 }
             )
 
-            // Start Gmail polling
+            // Start Gmail monitoring
             EmailMonitor.start()
 
-            updateNotification(
-                "✅ Aigentik monitoring — ${ContactEngine.getCount()} contacts"
-            )
-            Log.i(TAG, "All engines started — Aigentik v0.6 ready")
+            updateNotification("✅ $agentName monitoring — ${ContactEngine.getCount()} contacts")
+            Log.i(TAG, "$agentName v0.7 fully started")
         }
     }
 
@@ -83,9 +81,8 @@ class AigentikService : Service() {
         manager.notify(NOTIFICATION_ID, buildNotification(message))
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        return START_STICKY
-    }
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int =
+        START_STICKY
 
     override fun onDestroy() {
         EmailMonitor.stop()
@@ -96,8 +93,7 @@ class AigentikService : Service() {
 
     private fun createNotificationChannel() {
         val channel = NotificationChannel(
-            CHANNEL_ID,
-            "Aigentik Service",
+            CHANNEL_ID, "Aigentik Service",
             NotificationManager.IMPORTANCE_LOW
         ).apply {
             description = "Aigentik AI Assistant running in background"
@@ -105,13 +101,12 @@ class AigentikService : Service() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
-    private fun buildNotification(message: String): Notification {
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Aigentik")
+    private fun buildNotification(message: String): Notification =
+        NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(AigentikSettings.agentName)
             .setContentText(message)
             .setSmallIcon(R.drawable.ic_launcher)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .build()
-    }
 }
