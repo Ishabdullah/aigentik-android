@@ -6,6 +6,7 @@ appcompat = "1.6.1"
 material = "1.11.0"
 constraintlayout = "2.1.4"
 coroutines = "1.8.0"
+javamail = "1.6.2"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -13,6 +14,8 @@ androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version
 material = { group = "com.google.android.material", name = "material", version.ref = "material" }
 androidx-constraintlayout = { group = "androidx.constraintlayout", name = "constraintlayout", version.ref = "constraintlayout" }
 kotlinx-coroutines = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+javamail-android = { group = "com.sun.mail", name = "android-mail", version.ref = "javamail" }
+javamail-activation = { group = "com.sun.mail", name = "android-activation", version.ref = "javamail" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

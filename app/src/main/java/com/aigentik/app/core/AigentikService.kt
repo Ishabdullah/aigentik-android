@@ -9,51 +9,73 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.aigentik.app.R
+import com.aigentik.app.email.EmailMonitor
+import com.aigentik.app.email.EmailRouter
+import com.aigentik.app.email.GmailClient
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
-// AigentikService v0.4 — initializes all engines on startup
+// AigentikService v0.6 — full engine + email wired
 class AigentikService : Service() {
 
     companion object {
         const val CHANNEL_ID = "aigentik_service_channel"
         const val NOTIFICATION_ID = 1001
         private const val TAG = "AigentikService"
+
+        // NOTE: Load from SharedPreferences in v0.9
+        // Temporary hardcoded config — replaced by onboarding
+        private const val GMAIL_ADDRESS = "ismail.t.abdullah@gmail.com"
+        private const val GMAIL_APP_PASSWORD = "YOUR_APP_PASSWORD_HERE"
+        private const val ADMIN_NUMBER = "8602669332"
+        private const val OWNER_NAME = "Ish"
+        private const val AGENT_NAME = "Aigentik"
     }
+
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification("Aigentik starting..."))
-        initEngines()
-        Log.i(TAG, "AigentikService v0.4 started")
+        initAllEngines()
     }
 
-    private fun initEngines() {
-        // Init ContactEngine — loads saved contacts + syncs Android contacts
-        ContactEngine.init(this)
-        Log.i(TAG, "ContactEngine ready — ${ContactEngine.getCount()} contacts")
+    private fun initAllEngines() {
+        scope.launch {
+            // Init contact and rule engines
+            ContactEngine.init(this@AigentikService)
+            RuleEngine.init(this@AigentikService)
 
-        // Init RuleEngine — loads saved rules
-        RuleEngine.init(this)
-        Log.i(TAG, "RuleEngine ready")
+            // Configure Gmail
+            GmailClient.configure(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
 
-        // Configure MessageEngine with all callbacks
-        MessageEngine.configure(
-            adminNumber = "8602669332",
-            ownerName = "Ish",
-            agentName = "Aigentik",
-            replySender = { number, body ->
-                // NOTE: Google Voice email reply in v0.7
-                Log.i(TAG, "Reply queued to $number: ${body.take(50)}")
-            },
-            ownerNotifier = { message ->
-                // NOTE: Gmail notification in v0.7
-                Log.i(TAG, "Owner notification: ${message.take(80)}")
-                updateNotification(message.take(80))
-            }
-        )
+            // Configure MessageEngine with email reply callbacks
+            MessageEngine.configure(
+                adminNumber = ADMIN_NUMBER,
+                ownerName = OWNER_NAME,
+                agentName = AGENT_NAME,
+                replySender = { number, body ->
+                    // Route reply through Google Voice email
+                    EmailRouter.replyViaGVoice(number, body)
+                },
+                ownerNotifier = { message ->
+                    // Notify owner via Gmail
+                    EmailRouter.notifyOwner(message)
+                    updateNotification(message.take(80))
+                }
+            )
 
-        updateNotification("✅ Aigentik monitoring ${ContactEngine.getCount()} contacts")
-        Log.i(TAG, "All engines initialized")
+            // Start Gmail polling
+            EmailMonitor.start()
+
+            updateNotification(
+                "✅ Aigentik monitoring — ${ContactEngine.getCount()} contacts"
+            )
+            Log.i(TAG, "All engines started — Aigentik v0.6 ready")
+        }
     }
 
     private fun updateNotification(message: String) {
@@ -63,6 +85,11 @@ class AigentikService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         return START_STICKY
+    }
+
+    override fun onDestroy() {
+        EmailMonitor.stop()
+        super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
