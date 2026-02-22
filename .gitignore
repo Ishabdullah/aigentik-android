@@ -11,3 +11,6 @@ local.properties
 app/build/
 *.apk
 *.aab
+
+# llama.cpp source — cloned by GitHub Actions
+app/src/main/cpp/llama_src/

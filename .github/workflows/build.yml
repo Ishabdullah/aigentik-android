@@ -7,10 +7,15 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # NDK build takes longer — extend timeout to 45 minutes
+    timeout-minutes: 45
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          # Need full history for submodules
+          submodules: false
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -18,12 +23,53 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK r27b
+        run: |
+          echo "Installing NDK r27b..."
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;27.2.12479018"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> $GITHUB_ENV
+          echo "✅ NDK r27b installed"
+
+      - name: Install CMake
+        run: |
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "cmake;3.22.1"
+          echo "✅ CMake 3.22.1 installed"
+
+      - name: Cache llama.cpp source
+        uses: actions/cache@v4
+        id: llama-cache
+        with:
+          path: app/src/main/cpp/llama_src
+          key: llama-cpp-b5752
+
+      - name: Clone llama.cpp if not cached
+        if: steps.llama-cache.outputs.cache-hit != 'true'
+        run: |
+          echo "Cloning llama.cpp at commit b5752..."
+          git clone https://github.com/ggerganov/llama.cpp.git \
+            app/src/main/cpp/llama_src --depth=1
+          cd app/src/main/cpp/llama_src
+          echo "✅ llama.cpp cloned"
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('**/*.gradle*', '**/libs.versions.toml') }}
+
       - name: Extract version
         id: version
         run: |
-          VERSION=$(grep versionName app/build.gradle.kts | sed "s/.*versionName = \"//;s/\".*//")
+          VERSION=$(grep versionName app/build.gradle.kts | \
+            sed "s/.*versionName = \"//;s/\".*//")
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Building version $VERSION"
+          echo "Building Aigentik v$VERSION with llama.cpp NDK"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v3
@@ -31,10 +77,20 @@ jobs:
           gradle-version: "8.9"
 
       - name: Build Debug APK
-        run: gradle assembleDebug
+        run: |
+          gradle assembleDebug \
+            -Pandroid.ndkVersion=27.2.12479018 \
+            --stacktrace
 
-      - name: Upload APK to Release
-        if: github.ref == 'refs/heads/main'
+      - name: Verify APK contains native library
+        run: |
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          echo "Checking APK for native library..."
+          unzip -l $APK | grep "libaigentik_llama.so" && \
+            echo "✅ Native library found in APK" || \
+            echo "⚠️ Native library NOT found — check CMake config"
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Aigentik-v${{ steps.version.outputs.version }}-debug
