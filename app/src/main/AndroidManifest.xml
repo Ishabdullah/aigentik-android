@@ -35,6 +35,9 @@
         <activity android:name=".ui.OnboardingActivity"
             android:exported="false" android:label="Setup Aigentik"/>
 
+        <activity android:name=".ui.ChatActivity"
+            android:exported="false" android:label="Chat"/>
+
         <activity android:name=".ui.ModelManagerActivity"
             android:exported="false" android:label="AI Model"/>
 

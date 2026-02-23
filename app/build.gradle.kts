@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.kapt)
 }
 
 android {
@@ -11,12 +12,10 @@ android {
         applicationId = "com.aigentik.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 11
-        versionName = "0.9.2"
+        versionCode = 13
+        versionName = "0.9.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // Only build for ARM64 — S24 Ultra is arm64-v8a
-        // NOTE: Excludes x86/x86_64 — app will not run on emulators
         ndk {
             abiFilters += "arm64-v8a"
         }
@@ -35,6 +34,13 @@ android {
                     "-DGGML_OPENMP=OFF",
                     "-DBUILD_SHARED_LIBS=OFF"
                 )
+            }
+        }
+
+        // Room schema export directory
+        kapt {
+            arguments {
+                arg("room.schemaLocation", "$projectDir/schemas")
             }
         }
     }
@@ -85,4 +91,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines)
     implementation(libs.javamail.android)
     implementation(libs.javamail.activation)
+    implementation(libs.room.runtime)
+    implementation(libs.room.ktx)
+    kapt(libs.room.compiler)
 }
