@@ -179,7 +179,7 @@ object AiEngine {
             lower.contains("check") && lower.contains("email") ->
                 CommandResult("check_email", null, null, false)
             lower.contains("number") || (lower.contains("phone") && lower.contains("what")) -> {
-                val name = lower.replace(Regex("what.?s|what is|get|phone|number|'s|\?|whats"), "").trim()
+                val name = lower.replace(Regex("what.?s|what is|get|phone|number|'s|whats"), "").trim()
                 CommandResult("get_contact_phone", name.ifEmpty { null }, null, false)
             }
             lower.startsWith("find ") || lower.startsWith("look up ") ->
