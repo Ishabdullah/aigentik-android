@@ -322,10 +322,22 @@ object MessageEngine {
                     contact.instructions
                 )
 
-                // Route by channel — NOTIFICATION/RCS goes to SmsRouter not EmailRouter
+                // Route by channel
+                // NOTIFICATION = RCS/SMS via inline reply (no SEND_SMS needed)
+                // SMS = direct SmsManager (admin-initiated or fallback)
+                // EMAIL = Gmail SMTP / GVoice email thread
                 when (message.channel) {
+                    Message.Channel.NOTIFICATION -> {
+                        val sent = com.aigentik.app.adapters.NotificationReplyRouter.sendReply(
+                            message.id, reply
+                        )
+                        if (!sent) {
+                            // Fallback to SmsRouter if inline reply unavailable
+                            Log.w(TAG, "Inline reply failed — falling back to SmsRouter")
+                            SmsRouter.send(message.sender, reply)
+                        }
+                    }
                     Message.Channel.SMS          -> SmsRouter.send(message.sender, reply)
-                    Message.Channel.NOTIFICATION -> SmsRouter.send(message.sender, reply)
                     Message.Channel.EMAIL        -> EmailRouter.routeReply(message.sender, reply)
                     else                         -> SmsRouter.send(message.sender, reply)
                 }
