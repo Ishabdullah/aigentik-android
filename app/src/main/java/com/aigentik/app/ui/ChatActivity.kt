@@ -201,10 +201,10 @@ class ChatActivity : AppCompatActivity() {
                     val contact = com.aigentik.app.core.ContactEngine.findContact(name)
                     if (contact != null) {
                         "Found: ${contact.name}\n" +
-                        "• Phone: ${contact.phone ?: "unknown"}\n" +
-                        "• Email: ${contact.email ?: "unknown"}\n" +
-                        "• Relationship: ${contact.relationship ?: "none set"}\n" +
-                        "• Reply behavior: ${contact.replyBehavior}"
+                        "• Phone: ${contact.phones.firstOrNull() ?: "unknown"}\n" +
+                        "• Email: ${contact.emails.firstOrNull() ?: "unknown"}\n" +
+                        "• Relationship: ${contact.aliases.joinToString(", ").ifEmpty { "none" }}\n" +
+                        "• Reply behavior: ${"auto"}"
                     } else {
                         "No contact found for \"$name\". " +
                         "Try syncing contacts first."
