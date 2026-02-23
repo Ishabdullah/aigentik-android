@@ -64,7 +64,9 @@ object EmailRouter {
         }
 
         // Fallback: treat as phone number, send direct SMS
-        Log.i(TAG, "No email context for $senderIdentifier — routing to SMS")
+        // NOTE: If this triggers for an RCS message it means MessageEngine
+        //       sent an EMAIL channel message here — check channel routing
+        Log.w(TAG, "No email context for $senderIdentifier — falling back to SMS")
         SmsRouter.send(senderIdentifier, replyText)
     }
 

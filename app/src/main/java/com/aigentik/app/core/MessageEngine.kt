@@ -224,10 +224,13 @@ object MessageEngine {
                 )
 
                 // Route reply based on message channel
+                // NOTE: Gemini audit — NOTIFICATION/RCS must use SmsRouter not EmailRouter
+                // EmailRouter has no context for RCS messages and falls back incorrectly
                 when (message.channel) {
-                    Message.Channel.SMS -> SmsRouter.send(message.sender, reply)
-                    Message.Channel.EMAIL -> EmailRouter.routeReply(message.sender, reply)
-                    else -> EmailRouter.routeReply(message.sender, reply)
+                    Message.Channel.SMS          -> SmsRouter.send(message.sender, reply)
+                    Message.Channel.NOTIFICATION -> SmsRouter.send(message.sender, reply)
+                    Message.Channel.EMAIL        -> EmailRouter.routeReply(message.sender, reply)
+                    else                         -> SmsRouter.send(message.sender, reply)
                 }
 
                 notify("💬 Auto-replied to ${contact.name ?: message.sender}:\n" +

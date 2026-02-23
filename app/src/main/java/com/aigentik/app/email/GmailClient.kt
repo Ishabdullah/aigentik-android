@@ -54,7 +54,14 @@ object GmailClient {
     private var gmailAddress = ""
     private var appPassword = ""
     private var session: Session? = null
-    private var store: Store? = null
+
+    // TWO separate store connections to avoid IMAP folder conflict:
+    // idleStore  — persistent READ_ONLY connection for IDLE (server push)
+    // pollStore  — short-lived READ_WRITE connection opened per-poll only
+    // NOTE: Gemini audit found single-store caused "Folder already open"
+    //       MessagingException aborting all email processing
+    private var idleStore: Store? = null
+    private var pollStore: Store? = null
     private var idleFolder: Folder? = null
 
     // Skip emails that arrived before app started
@@ -114,28 +121,43 @@ object GmailClient {
         })
     }
 
+    // Connect poll store — used for short-lived READ_WRITE fetch operations
     suspend fun connect(): Boolean = withContext(Dispatchers.IO) {
         try {
-            store?.close()
-            store = session?.getStore("imaps")
-            store?.connect(IMAP_HOST, IMAP_PORT, gmailAddress, appPassword)
-            Log.i(TAG, "Gmail IMAP connected")
+            try { pollStore?.close() } catch (e: Exception) { }
+            pollStore = session?.getStore("imaps")
+            pollStore?.connect(IMAP_HOST, IMAP_PORT, gmailAddress, appPassword)
+            Log.i(TAG, "Poll store connected")
             true
         } catch (e: Exception) {
-            Log.e(TAG, "IMAP connection failed: ${e.message}")
+            Log.e(TAG, "Poll store connection failed: ${e.message}")
             false
         }
     }
 
-    // Open IDLE folder — call once, keep open
-    // NOTE: IDLE blocks the thread — must run on Dispatchers.IO
+    // Connect IDLE store — separate persistent READ_ONLY connection
+    suspend fun connectIdle(): Boolean = withContext(Dispatchers.IO) {
+        try {
+            try { idleStore?.close() } catch (e: Exception) { }
+            idleStore = session?.getStore("imaps")
+            idleStore?.connect(IMAP_HOST, IMAP_PORT, gmailAddress, appPassword)
+            Log.i(TAG, "IDLE store connected")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "IDLE store connection failed: ${e.message}")
+            false
+        }
+    }
+
+    // Open IDLE folder on IDLE store (READ_ONLY — no conflict with poll)
     suspend fun openIdleFolder(): Folder? = withContext(Dispatchers.IO) {
         try {
-            if (store?.isConnected != true) connect()
-            val folder = store?.getFolder("INBOX") ?: return@withContext null
-            folder.open(Folder.READ_WRITE)
+            if (idleStore?.isConnected != true) connectIdle()
+            // READ_ONLY — IDLE only needs to watch for EXISTS notifications
+            val folder = idleStore?.getFolder("INBOX") ?: return@withContext null
+            folder.open(Folder.READ_ONLY)
             idleFolder = folder
-            Log.i(TAG, "IDLE folder opened")
+            Log.i(TAG, "IDLE folder opened READ_ONLY on separate store")
             folder
         } catch (e: Exception) {
             Log.e(TAG, "IDLE folder open failed: ${e.message}")
@@ -172,8 +194,8 @@ object GmailClient {
         withContext(Dispatchers.IO) {
             var folder: Folder? = null
             try {
-                if (store?.isConnected != true) connect()
-                folder = store?.getFolder("INBOX")
+                connect()
+                folder = pollStore?.getFolder("INBOX")
                 folder?.open(Folder.READ_WRITE)
 
                 val unseen = folder?.search(
@@ -389,9 +411,10 @@ object GmailClient {
 
     fun disconnect() {
         try { idleFolder?.close(false) } catch (e: Exception) { }
-        try { store?.close() } catch (e: Exception) { }
+        try { idleStore?.close() } catch (e: Exception) { }
+        try { pollStore?.close() } catch (e: Exception) { }
         Log.i(TAG, "Gmail disconnected")
     }
 
-    fun isConnected() = store?.isConnected == true
+    fun isConnected() = idleStore?.isConnected == true || pollStore?.isConnected == true
 }

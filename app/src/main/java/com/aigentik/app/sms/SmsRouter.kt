@@ -26,20 +26,36 @@ object SmsRouter {
             return
         }
 
+        // Format to E.164 — carriers reject 10-digit numbers without country code
+        // NOTE: Gemini audit found this was causing silent carrier rejection
+        val e164Number = toE164(toNumber)
+        Log.i(TAG, "SMS to $toNumber → formatted as $e164Number")
+
         try {
-            // Split into parts if > 160 chars
             val smsManager = ctx.getSystemService(SmsManager::class.java)
             val parts = smsManager.divideMessage(body)
 
             if (parts.size == 1) {
-                smsManager.sendTextMessage(toNumber, null, body, null, null)
-                Log.i(TAG, "SMS sent to $toNumber")
+                smsManager.sendTextMessage(e164Number, null, body, null, null)
+                Log.i(TAG, "SMS sent to $e164Number")
             } else {
-                smsManager.sendMultipartTextMessage(toNumber, null, parts, null, null)
-                Log.i(TAG, "Multipart SMS (${parts.size} parts) sent to $toNumber")
+                smsManager.sendMultipartTextMessage(e164Number, null, parts, null, null)
+                Log.i(TAG, "Multipart SMS (${parts.size} parts) sent to $e164Number")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "SMS send failed to $toNumber: ${e.message}")
+            Log.e(TAG, "SMS send failed to $e164Number: ${e.message}")
+        }
+    }
+
+    // Convert any phone number format to E.164 (+1XXXXXXXXXX for US)
+    // Handles: 10-digit, 11-digit with 1, formatted with dashes/parens/spaces
+    private fun toE164(number: String): String {
+        val digits = number.filter { it.isDigit() }
+        return when {
+            digits.length == 10 -> "+1$digits"           // 10-digit US → +1XXXXXXXXXX
+            digits.length == 11 && digits.startsWith("1") -> "+$digits"  // 1XXXXXXXXXX → +1XXXXXXXXXX
+            digits.startsWith("+") -> number             // already E.164
+            else -> "+1$digits"                          // best-effort US assumption
         }
     }
 }
