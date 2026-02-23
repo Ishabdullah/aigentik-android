@@ -101,16 +101,17 @@ class NotificationAdapter : NotificationListenerService() {
             channel = Message.Channel.NOTIFICATION
         )
 
-        // Register inline reply handler before forwarding to MessageEngine
-        NotificationReplyRouter.register(dedupKey, sbn, sbn.packageName)
+        // Register inline reply handler — pass both semantic key AND sbn.key
+        NotificationReplyRouter.register(dedupKey, sbn.notification, sbn.packageName, sbn.key)
 
         MessageEngine.onMessageReceived(message)
         Log.i(TAG, "RCS/SMS notification → MessageEngine: $dedupKey")
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
-        // Clean up stored notifications when dismissed
         activeNotifications.entries.removeIf { it.value.key == sbn.key }
+        // Evict from reply router — prevents stale PendingIntent sends
+        NotificationReplyRouter.onNotificationRemoved(sbn.key)
     }
 
     // Resolve sender to phone number or best available identifier
