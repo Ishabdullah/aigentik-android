@@ -1,9 +1,9 @@
-// llama_jni.cpp v0.9.4
-// Fixes: armv8.4-a arch, mutex guard, batch_clear, sampler API, JNI threading
-// Crash was SIGSEGV in ggml_compute_forward_mul_mat due to:
-//   1. armv8-a+dotprod generating misaligned GEMM kernels on Cortex-X4
-//   2. No llama_batch_clear between calls — dirty buffers hit math kernel
-//   3. No mutex — concurrent JNI calls corrupted context state
+// llama_jni.cpp v0.9.5
+// Fixes:
+// - Context reset between calls (was causing single-response then fallback)
+// - llama_kv_cache_clear removed — use context recreation instead
+// - mutex guard retained
+// - batch.n_tokens = 0 for batch reuse (no llama_batch_clear in this API)
 
 #include <jni.h>
 #include <string>
@@ -21,14 +21,31 @@ static llama_model*   g_model   = nullptr;
 static llama_context* g_ctx     = nullptr;
 static std::mutex     g_mutex;
 
+// Recreate context to clear KV cache between generations
+// This is the safest approach — avoids dirty cache causing decode failures
+// NOTE: Context recreation takes ~50ms — acceptable for chat use case
+static bool resetContext() {
+    if (!g_model) return false;
+    if (g_ctx) {
+        llama_free(g_ctx);
+        g_ctx = nullptr;
+    }
+    llama_context_params cp = llama_context_default_params();
+    cp.n_ctx           = 2048;
+    cp.n_threads       = 4;
+    cp.n_threads_batch = 4;
+    g_ctx = llama_init_from_model(g_model, cp);
+    if (!g_ctx) { LOGE("Context reset failed"); return false; }
+    LOGI("Context reset OK");
+    return true;
+}
+
 extern "C"
 JNIEXPORT jboolean JNICALL
 Java_com_aigentik_app_ai_LlamaJNI_nativeLoadModel(
-        JNIEnv* env, jobject,
-        jstring modelPath) {
+        JNIEnv* env, jobject, jstring modelPath) {
 
     std::lock_guard<std::mutex> lock(g_mutex);
-
     const char* path = env->GetStringUTFChars(modelPath, nullptr);
     LOGI("Loading: %s", path);
 
@@ -42,18 +59,8 @@ Java_com_aigentik_app_ai_LlamaJNI_nativeLoadModel(
 
     if (!g_model) { LOGE("Model load failed"); return JNI_FALSE; }
 
-    llama_context_params cp = llama_context_default_params();
-    cp.n_ctx          = 2048;
-    cp.n_threads      = 4;
-    cp.n_threads_batch = 4;
+    if (!resetContext()) return JNI_FALSE;
 
-    g_ctx = llama_init_from_model(g_model, cp);
-    if (!g_ctx) {
-        LOGE("Context init failed");
-        llama_model_free(g_model);
-        g_model = nullptr;
-        return JNI_FALSE;
-    }
     LOGI("Model ready");
     return JNI_TRUE;
 }
@@ -61,13 +68,18 @@ Java_com_aigentik_app_ai_LlamaJNI_nativeLoadModel(
 extern "C"
 JNIEXPORT jstring JNICALL
 Java_com_aigentik_app_ai_LlamaJNI_nativeGenerate(
-        JNIEnv* env, jobject,
-        jstring promptStr, jint maxTokens) {
+        JNIEnv* env, jobject, jstring promptStr, jint maxTokens) {
 
     std::lock_guard<std::mutex> lock(g_mutex);
 
     if (!g_model || !g_ctx) {
-        LOGE("Generate called — no model");
+        LOGE("Generate — no model");
+        return env->NewStringUTF("");
+    }
+
+    // Reset context before EVERY generation
+    // Prevents KV cache overflow causing decode failure on second call
+    if (!resetContext()) {
         return env->NewStringUTF("");
     }
 
@@ -77,22 +89,32 @@ Java_com_aigentik_app_ai_LlamaJNI_nativeGenerate(
     // Tokenize
     int n = -llama_tokenize(vocab, prompt, (int)strlen(prompt),
                             nullptr, 0, true, true);
+    if (n <= 0) {
+        LOGE("Tokenize failed");
+        env->ReleaseStringUTFChars(promptStr, prompt);
+        return env->NewStringUTF("");
+    }
+
     std::vector<llama_token> tokens(n);
     llama_tokenize(vocab, prompt, (int)strlen(prompt),
                    tokens.data(), n, true, true);
     env->ReleaseStringUTFChars(promptStr, prompt);
 
-    LOGI("Prompt: %d tokens, max new: %d", n, (int)maxTokens);
+    LOGI("Tokens: %d, max new: %d", n, (int)maxTokens);
 
-    // Init sampler — greedy for determinism, avoids sampling randomness crashes
+    // Check context limit
+    if (n >= (int)llama_n_ctx(g_ctx)) {
+        LOGE("Prompt too long: %d >= %d", n, (int)llama_n_ctx(g_ctx));
+        return env->NewStringUTF("Prompt too long for context window.");
+    }
+
+    // Sampler — greedy for stability
     llama_sampler_chain_params sparams = llama_sampler_chain_default_params();
     llama_sampler* sampler = llama_sampler_chain_init(sparams);
     llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
 
-    // Init batch — sized for prompt
+    // Batch sized for prompt
     llama_batch batch = llama_batch_init((int)tokens.size(), 0, 1);
-
-    // NOTE: llama_batch_clear zeros n_tokens — MUST call before filling
     batch.n_tokens = 0;
 
     for (int i = 0; i < n; i++) {
@@ -105,13 +127,13 @@ Java_com_aigentik_app_ai_LlamaJNI_nativeGenerate(
     batch.n_tokens = n;
 
     if (llama_decode(g_ctx, batch) != 0) {
-        LOGE("Decode failed on prompt");
+        LOGE("Prompt decode failed");
         llama_batch_free(batch);
         llama_sampler_free(sampler);
         return env->NewStringUTF("");
     }
 
-    // Generate
+    // Autoregressive generation loop
     std::string result;
     int pos = n;
     llama_token eos = llama_vocab_eos(vocab);
@@ -120,12 +142,18 @@ Java_com_aigentik_app_ai_LlamaJNI_nativeGenerate(
         llama_token tok = llama_sampler_sample(sampler, g_ctx, -1);
         if (tok == eos || tok < 0) break;
 
+        // Stop on common end markers for Qwen3
         char piece[256] = {};
         int len = llama_token_to_piece(vocab, tok, piece, sizeof(piece) - 1, 0, false);
-        if (len > 0) result.append(piece, len);
+        if (len > 0) {
+            std::string p(piece, len);
+            // Stop on ChatML end token
+            if (p.find("<|im_end|>") != std::string::npos) break;
+            result += p;
+        }
 
-        // NOTE: batch_clear + single token batch for each new token
-        batch.n_tokens = 0;
+        // Next token batch
+        batch.n_tokens     = 0;
         batch.token[0]     = tok;
         batch.pos[0]       = pos;
         batch.n_seq_id[0]  = 1;
@@ -138,12 +166,18 @@ Java_com_aigentik_app_ai_LlamaJNI_nativeGenerate(
             break;
         }
         pos++;
+
+        // Safety: stop before context overflow
+        if (pos >= (int)llama_n_ctx(g_ctx) - 10) {
+            LOGI("Context limit approaching — stopping generation");
+            break;
+        }
     }
 
     llama_batch_free(batch);
     llama_sampler_free(sampler);
 
-    LOGI("Done: %zu chars", result.size());
+    LOGI("Generated: %zu chars", result.size());
     return env->NewStringUTF(result.c_str());
 }
 
@@ -159,7 +193,7 @@ Java_com_aigentik_app_ai_LlamaJNI_nativeUnload(JNIEnv*, jobject) {
     std::lock_guard<std::mutex> lock(g_mutex);
     if (g_ctx)   { llama_free(g_ctx);         g_ctx   = nullptr; }
     if (g_model) { llama_model_free(g_model); g_model = nullptr; }
-    LOGI("Model unloaded");
+    LOGI("Unloaded");
 }
 
 extern "C"

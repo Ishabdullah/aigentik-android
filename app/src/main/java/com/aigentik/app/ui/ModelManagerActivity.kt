@@ -308,19 +308,41 @@ class ModelManagerActivity : AppCompatActivity() {
     }
 
     // Get real file path from URI
-    // NOTE: Works for file:// URIs and most content:// from file managers
+    // NOTE: Android 13+ content:// URIs may not expose _data column
+    // We copy the file to app storage and return that path instead
     private fun getRealPath(uri: Uri): String? {
         return try {
-            if (uri.scheme == "file") {
-                uri.path
-            } else {
-                // Try to get path from content URI
-                contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        val idx = cursor.getColumnIndex("_data")
-                        if (idx >= 0) cursor.getString(idx) else null
-                    } else null
+            when (uri.scheme) {
+                "file" -> uri.path
+                "content" -> {
+                    // Try _data column first (works on most file managers)
+                    val fromData = contentResolver.query(
+                        uri, arrayOf("_data"), null, null, null
+                    )?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val idx = cursor.getColumnIndex("_data")
+                            if (idx >= 0) cursor.getString(idx) else null
+                        } else null
+                    }
+                    if (fromData != null) return fromData
+
+                    // Android 13+ fallback: copy to app models dir via stream
+                    // NOTE: This is the correct approach for scoped storage
+                    val fileName = contentResolver.query(
+                        uri, arrayOf("_display_name"), null, null, null
+                    )?.use { cursor ->
+                        if (cursor.moveToFirst()) cursor.getString(0) else null
+                    } ?: "model_${System.currentTimeMillis()}.gguf"
+
+                    val destFile = java.io.File(modelsDir, fileName)
+                    contentResolver.openInputStream(uri)?.use { input ->
+                        java.io.FileOutputStream(destFile).use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    if (destFile.exists()) destFile.absolutePath else null
                 }
+                else -> null
             }
         } catch (e: Exception) {
             Log.w(TAG, "getRealPath failed: ${e.message}")
