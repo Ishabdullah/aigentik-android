@@ -13,19 +13,23 @@ import com.aigentik.app.ai.AiEngine
 import com.aigentik.app.email.EmailMonitor
 import com.aigentik.app.email.EmailRouter
 import com.aigentik.app.email.GmailClient
+import com.aigentik.app.sms.SmsRouter
 import com.aigentik.app.system.ConnectionWatchdog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-// AigentikService v0.9.2 — auto-loads model on startup if path saved
+// AigentikService v1.0
+// New: SmsRouter.init(), ChannelManager.loadFromSettings()
+// MessageEngine no longer takes replySender — routing is internal
+// chatNotifier wired to post notifications into Room DB via ChatBridge
 class AigentikService : Service() {
 
     companion object {
-        const val CHANNEL_ID = "aigentik_service_channel"
-        const val NOTIFICATION_ID = 1001
-        private const val TAG = "AigentikService"
+        const val CHANNEL_ID       = "aigentik_service_channel"
+        const val NOTIFICATION_ID  = 1001
+        private const val TAG      = "AigentikService"
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -34,10 +38,8 @@ class AigentikService : Service() {
         super.onCreate()
         AigentikSettings.init(this)
         createNotificationChannel()
-        startForeground(
-            NOTIFICATION_ID,
-            buildNotification("${AigentikSettings.agentName} starting...")
-        )
+        startForeground(NOTIFICATION_ID,
+            buildNotification("${AigentikSettings.agentName} starting..."))
         initAllEngines()
     }
 
@@ -56,100 +58,93 @@ class AigentikService : Service() {
                     return@launch
                 }
 
-                // Init contact + rule engines
+                // Core engines
                 ContactEngine.init(this@AigentikService)
                 RuleEngine.init(this@AigentikService)
                 Log.i(TAG, "Engines initialized — ${ContactEngine.getCount()} contacts")
 
-                // Auto-load AI model if previously configured
+                // Channel states
+                ChannelManager.loadFromSettings()
+
+                // SMS sending
+                SmsRouter.init(this@AigentikService)
+
+                // AI model
                 val modelPath = AigentikSettings.modelPath
+                AiEngine.configure(agentName, ownerName)
                 if (modelPath.isNotEmpty() && java.io.File(modelPath).exists()) {
                     Log.i(TAG, "Auto-loading model: $modelPath")
-                    AiEngine.configure(agentName, ownerName)
                     AiEngine.loadModel(modelPath)
                     Log.i(TAG, "Model state: ${AiEngine.state}")
                 } else {
-                    Log.w(TAG, "No model configured — using fallback replies")
-                    AiEngine.configure(agentName, ownerName)
+                    Log.w(TAG, "No model — fallback mode")
                 }
 
-                // Configure Gmail
+                // Gmail
                 GmailClient.configure(gmail, password)
 
-                // Configure MessageEngine
+                // MessageEngine — no replySender arg now (routing is internal)
                 MessageEngine.configure(
                     adminNumber  = adminNumber,
                     ownerName    = ownerName,
                     agentName    = agentName,
-                    replySender  = { number, body -> EmailRouter.replyViaGVoice(number, body) },
                     ownerNotifier = { message ->
                         EmailRouter.notifyOwner(message)
                         updateNotification(message.take(60))
                     }
                 )
 
-                // Start email monitoring + watchdog
+                // Wire chat notifier — posts to Room DB so notifications appear in chat
+                MessageEngine.chatNotifier = { message ->
+                    ChatBridge.post(message)
+                }
+
                 EmailMonitor.start()
                 ConnectionWatchdog.start()
 
-                val modelStatus = if (AiEngine.isReady()) "AI ready" else "AI fallback mode"
+                val modelStatus = if (AiEngine.isReady()) "AI ready" else "AI fallback"
                 updateNotification(
                     "✅ $agentName active — ${ContactEngine.getCount()} contacts — $modelStatus"
                 )
-                Log.i(TAG, "$agentName v0.9.2 fully started")
+                Log.i(TAG, "Aigentik v1.0 fully started")
 
             } catch (e: Exception) {
-                Log.e(TAG, "Startup error: ${e.message}")
-                updateNotification("⚠️ Startup error: ${e.message?.take(50)}")
+                Log.e(TAG, "Init failed: ${e.message}")
+                updateNotification("⚠️ Init error: ${e.message?.take(50)}")
             }
         }
     }
 
-    private fun updateNotification(message: String) {
-        try {
-            getSystemService(NotificationManager::class.java)
-                .notify(NOTIFICATION_ID, buildNotification(message))
-        } catch (e: Exception) {
-            Log.w(TAG, "Notification update failed: ${e.message}")
-        }
+    private fun updateNotification(text: String) {
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.notify(NOTIFICATION_ID, buildNotification(text))
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent == null) {
-            Log.i(TAG, "Service restarted by system — reinitializing")
-            initAllEngines()
-        }
-        return START_STICKY
-    }
-
-    override fun onDestroy() {
-        Log.i(TAG, "AigentikService destroyed")
-        ConnectionWatchdog.stop()
-        EmailMonitor.stop()
-        super.onDestroy()
-    }
-
-    override fun onBind(intent: Intent?): IBinder? = null
-
-    private fun createNotificationChannel() {
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            "Aigentik Service",
-            NotificationManager.IMPORTANCE_LOW
-        ).apply {
-            description = "Aigentik AI Assistant running in background"
-            setShowBadge(false)
-        }
-        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
-    }
-
-    private fun buildNotification(message: String): Notification =
+    private fun buildNotification(text: String): Notification =
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(AigentikSettings.agentName)
-            .setContentText(message)
+            .setContentText(text)
             .setSmallIcon(R.drawable.ic_launcher)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
-            .setOnlyAlertOnce(true)
             .build()
+
+    private fun createNotificationChannel() {
+        val channel = NotificationChannel(
+            CHANNEL_ID, "Aigentik Service",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply { description = "Aigentik background service" }
+        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int) =
+        START_STICKY
+
+    override fun onBind(p: Intent?): IBinder? = null
+
+    override fun onDestroy() {
+        EmailMonitor.stop()
+        ConnectionWatchdog.stop()
+        super.onDestroy()
+    }
 }

@@ -3,22 +3,23 @@ package com.aigentik.app.core
 import android.content.Context
 import android.content.SharedPreferences
 
-// AigentikSettings v0.7 — persists all user configuration
-// Replaces hardcoded values in AigentikService
+// AigentikSettings v1.0 — persists all user configuration
+// Added: channel enable/disable states for SMS, GVOICE, EMAIL
 object AigentikSettings {
 
     private const val PREFS_NAME = "aigentik_settings"
 
-    // Keys
-    private const val KEY_CONFIGURED = "configured"
-    private const val KEY_AGENT_NAME = "agent_name"
-    private const val KEY_OWNER_NAME = "owner_name"
-    private const val KEY_ADMIN_NUMBER = "admin_number"
-    private const val KEY_AIGENTIK_NUMBER = "aigentik_number"
-    private const val KEY_GMAIL_ADDRESS = "gmail_address"
+    private const val KEY_CONFIGURED       = "configured"
+    private const val KEY_AGENT_NAME       = "agent_name"
+    private const val KEY_OWNER_NAME       = "owner_name"
+    private const val KEY_ADMIN_NUMBER     = "admin_number"
+    private const val KEY_AIGENTIK_NUMBER  = "aigentik_number"
+    private const val KEY_GMAIL_ADDRESS    = "gmail_address"
     private const val KEY_GMAIL_APP_PASSWORD = "gmail_app_password"
-    private const val KEY_AUTO_REPLY = "auto_reply_default"
-    private const val KEY_PAUSED = "paused"
+    private const val KEY_AUTO_REPLY       = "auto_reply_default"
+    private const val KEY_PAUSED           = "paused"
+    private const val KEY_MODEL_PATH       = "model_path"
+    private const val KEY_CHANNEL_PREFIX   = "channel_enabled_"
 
     private lateinit var prefs: SharedPreferences
 
@@ -26,7 +27,6 @@ object AigentikSettings {
         prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
 
-    // First run check
     var isConfigured: Boolean
         get() = prefs.getBoolean(KEY_CONFIGURED, false)
         set(value) = prefs.edit().putBoolean(KEY_CONFIGURED, value).apply()
@@ -59,15 +59,22 @@ object AigentikSettings {
         get() = prefs.getBoolean(KEY_AUTO_REPLY, true)
         set(value) = prefs.edit().putBoolean(KEY_AUTO_REPLY, value).apply()
 
-    var modelPath: String
-        get() = prefs.getString("model_path", "") ?: ""
-        set(v) = prefs.edit().putString("model_path", v).apply()
-
     var isPaused: Boolean
         get() = prefs.getBoolean(KEY_PAUSED, false)
         set(value) = prefs.edit().putBoolean(KEY_PAUSED, value).apply()
 
-    // Save all settings at once from onboarding
+    var modelPath: String
+        get() = prefs.getString(KEY_MODEL_PATH, "") ?: ""
+        set(v) = prefs.edit().putString(KEY_MODEL_PATH, v).apply()
+
+    // Channel enable/disable persistence
+    fun setChannelEnabled(channelName: String, enabled: Boolean) {
+        prefs.edit().putBoolean("$KEY_CHANNEL_PREFIX$channelName", enabled).apply()
+    }
+
+    fun getChannelEnabled(channelName: String, default: Boolean = true): Boolean =
+        prefs.getBoolean("$KEY_CHANNEL_PREFIX$channelName", default)
+
     fun saveFromOnboarding(
         agentName: String,
         ownerName: String,

@@ -12,8 +12,8 @@ android {
         applicationId = "com.aigentik.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 16
-        versionName = "0.9.5"
+        versionCode = 17
+        versionName = "1.0.0-beta"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {

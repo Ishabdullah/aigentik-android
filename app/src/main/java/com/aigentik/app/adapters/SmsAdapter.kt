@@ -5,11 +5,20 @@ import android.content.Context
 import android.content.Intent
 import android.provider.Telephony
 import android.util.Log
+import com.aigentik.app.core.ChannelManager
 import com.aigentik.app.core.Message
 import com.aigentik.app.core.MessageDeduplicator
 import com.aigentik.app.core.MessageEngine
 
-// SmsAdapter v0.3 — fully wired to MessageEngine
+// SmsAdapter v1.0 — receives direct SMS via BroadcastReceiver
+// NOTE: Receives SMS from the Aigentik phone number (non-Google-Voice number)
+// GVoice texts are handled via EmailMonitor (arrive as Gmail forwarded emails)
+// This handles SMS to the direct SIM number only
+//
+// IMPORTANT: Samsung Messages is still the default SMS app
+//   Samsung handles storage and UI — we intercept via broadcast
+//   We can RECEIVE because BROADCAST_SMS permission is declared
+//   We can SEND via SmsManager without being default app
 class SmsAdapter : BroadcastReceiver() {
 
     companion object {
@@ -19,33 +28,41 @@ class SmsAdapter : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION) return
 
-        val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
-        if (messages.isNullOrEmpty()) return
-
-        val sender = messages[0].displayOriginatingAddress ?: return
-        val body = messages.joinToString("") { it.messageBody }
-        val timestamp = messages[0].timestampMillis
-
-        Log.d(TAG, "SMS from $sender: ${body.take(50)}")
-
-        // Deduplication — register fingerprint first
-        // NotificationAdapter will skip if it sees same fingerprint
-        if (!MessageDeduplicator.isNew(sender, body, timestamp)) {
-            Log.d(TAG, "Duplicate SMS — skipping")
+        // Check SMS channel is enabled
+        if (!ChannelManager.isEnabled(ChannelManager.Channel.SMS)) {
+            Log.i(TAG, "SMS channel disabled — ignoring")
             return
         }
 
-        val message = Message(
-            id = MessageDeduplicator.fingerprint(sender, body, timestamp),
-            sender = sender,
-            senderName = null,
-            body = body,
-            timestamp = timestamp,
-            channel = Message.Channel.SMS
-        )
+        val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
+        if (messages.isNullOrEmpty()) return
 
-        // Forward to MessageEngine
-        MessageEngine.onMessageReceived(message)
-        Log.d(TAG, "SMS forwarded to MessageEngine: ${message.id}")
+        // Group by sender (multipart SMS)
+        val grouped = messages.groupBy { it.originatingAddress ?: "" }
+
+        for ((sender, parts) in grouped) {
+            if (sender.isBlank()) continue
+
+            val body = parts.joinToString("") { it.messageBody ?: "" }
+            val timestamp = parts.firstOrNull()?.timestampMillis ?: System.currentTimeMillis()
+
+            Log.i(TAG, "SMS from $sender: ${body.take(50)}")
+
+            if (!MessageDeduplicator.isNew(sender, body, timestamp)) {
+                Log.d(TAG, "Duplicate SMS — skipping")
+                continue
+            }
+
+            val message = Message(
+                id = MessageDeduplicator.fingerprint(sender, body, timestamp),
+                sender = sender,
+                senderName = null,
+                body = body,
+                timestamp = timestamp,
+                channel = Message.Channel.SMS
+            )
+
+            MessageEngine.onMessageReceived(message)
+        }
     }
 }

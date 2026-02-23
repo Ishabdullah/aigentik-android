@@ -56,6 +56,7 @@ class ChatActivity : AppCompatActivity() {
         setContentView(R.layout.activity_chat)
         AigentikSettings.init(this)
         db = ChatDatabase.getInstance(this)
+        com.aigentik.app.core.ChatBridge.init(db)
 
         messageContainer = findViewById(R.id.messageContainer)
         scrollView = findViewById(R.id.scrollView)
