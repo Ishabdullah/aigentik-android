@@ -53,7 +53,8 @@ object AigentikSettings {
 
     var gmailAppPassword: String
         get() = prefs.getString(KEY_GMAIL_APP_PASSWORD, "") ?: ""
-        set(value) = prefs.edit().putString(KEY_GMAIL_APP_PASSWORD, value).apply()
+        // Strip spaces on save — app passwords with spaces fail IMAP auth
+        set(value) = prefs.edit().putString(KEY_GMAIL_APP_PASSWORD, value.replace(" ", "").trim()).apply()
 
     var autoReplyDefault: Boolean
         get() = prefs.getBoolean(KEY_AUTO_REPLY, true)

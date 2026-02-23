@@ -87,10 +87,13 @@ object GmailClient {
     )
 
     fun configure(address: String, password: String) {
-        gmailAddress = address
-        appPassword = password
+        gmailAddress = address.trim()
+        // Strip spaces — app passwords display as "xxxx xxxx xxxx xxxx" but
+        // must be passed to IMAP as "xxxxxxxxxxxxxxxx" (no spaces)
+        // This was silently failing IMAP auth on every connect attempt
+        appPassword = password.replace(" ", "").trim()
         initSession()
-        Log.i(TAG, "GmailClient configured for $address")
+        Log.i(TAG, "GmailClient configured for $gmailAddress (password length: ${appPassword.length})")
     }
 
     private fun initSession() {

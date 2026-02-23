@@ -30,6 +30,7 @@ object EmailMonitor {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     @Volatile private var isRunning = false
+    fun isRunning() = isRunning
 
     fun start() {
         if (isRunning) return

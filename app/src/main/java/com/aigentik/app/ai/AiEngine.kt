@@ -162,15 +162,28 @@ object AiEngine {
     }
 
     // Simple rule-based command parser used as fallback when model not loaded
+    // Public so MessageEngine can use it as keyword fallback
+    fun parseSimpleCommandPublic(text: String): CommandResult = parseSimpleCommand(text)
+
     private fun parseSimpleCommand(text: String): CommandResult {
         val lower = text.lowercase().trim()
         return when {
-            lower.startsWith("text ") || lower.startsWith("send ") -> {
-                val parts = lower.removePrefix("text ").removePrefix("send ").split(" ", limit = 2)
+            lower.startsWith("text ") || lower.startsWith("send text") -> {
+                val parts = lower.removePrefix("text ").removePrefix("send text ").trim().split(" ", limit = 2)
                 CommandResult("send_sms", parts.getOrNull(0), parts.getOrNull(1), false)
             }
+            lower.startsWith("email ") || lower.startsWith("send email") -> {
+                val parts = lower.removePrefix("email ").removePrefix("send email ").trim().split(" ", limit = 2)
+                CommandResult("send_email", parts.getOrNull(0), parts.getOrNull(1), false)
+            }
+            lower.contains("check") && lower.contains("email") ->
+                CommandResult("check_email", null, null, false)
+            lower.contains("number") || (lower.contains("phone") && lower.contains("what")) -> {
+                val name = lower.replace(Regex("what.?s|what is|get|phone|number|'s|\?|whats"), "").trim()
+                CommandResult("get_contact_phone", name.ifEmpty { null }, null, false)
+            }
             lower.startsWith("find ") || lower.startsWith("look up ") ->
-                CommandResult("find_contact", lower.removePrefix("find ").removePrefix("look up "), null, false)
+                CommandResult("find_contact", lower.removePrefix("find ").removePrefix("look up ").trim(), null, false)
             lower.contains("never reply") ->
                 CommandResult("never_reply_to", lower.substringAfter("never reply to ").trim(), null, false)
             lower.contains("always reply") ->

@@ -170,16 +170,111 @@ object MessageEngine {
                     notify("✅ Text sent to ${contact?.name ?: target}:\n\"${naturalMsg.take(100)}\"")
                 }
 
-                else -> {
-                    // Use AI for natural conversation
-                    if (AiEngine.isReady()) {
-                        val reply = AiEngine.generateSmsReply(
-                            ownerName, adminNumber, input, null, null
+                "check_email", "read_email", "list_email" -> {
+                    // Owner asking to see recent emails
+                    notify("📧 Checking emails... I monitor your Gmail automatically.
+" +
+                           "Any new messages from real people will appear here.
+" +
+                           "Say 'email status' to see connection status.")
+                }
+
+                "send_email" -> {
+                    val target = result.target ?: run { notify("Who should I email?"); return }
+                    val content = result.content ?: run { notify("What should I say?"); return }
+                    val contact = ContactEngine.findContact(target)
+                        ?: ContactEngine.findByRelationship(target)
+                    val toEmail = contact?.emails?.firstOrNull() ?: target
+                    scope.launch {
+                        val body = AiEngine.generateEmailReply(
+                            contact?.name, toEmail, "Message from $ownerName", content,
+                            contact?.relationship, contact?.instructions
                         )
-                        notify(reply)
+                        val sent = com.aigentik.app.email.GmailClient.sendEmail(toEmail, "Hi from $ownerName", body)
+                        notify(if (sent) "✅ Email sent to ${contact?.name ?: target}"
+                               else "❌ Failed to send email to ${contact?.name ?: target}")
+                    }
+                }
+
+                "get_contact_phone", "contact_phone", "phone_number" -> {
+                    val target = result.target ?: run { notify("Who are you looking for?"); return }
+                    val contact = ContactEngine.findContact(target)
+                        ?: ContactEngine.findByRelationship(target)
+                        ?: ContactEngine.findAllByName(target).firstOrNull()
+                    if (contact != null) {
+                        val phones = contact.phones.joinToString(", ").ifEmpty { "no phone on file" }
+                        val emails = contact.emails.joinToString(", ").ifEmpty { "no email on file" }
+                        notify("📒 ${contact.name ?: target}:
+📞 $phones
+📧 $emails")
                     } else {
-                        notify("Command not recognized. Try: status, channels, " +
-                               "stop/start sms/email/gvoice, find [name], text [name] [msg]")
+                        notify("No contact found for "$target". Try 'find $target'.")
+                    }
+                }
+
+                else -> {
+                    // For truly unknown commands — try keyword routing before giving up
+                    val lower2 = input.lowercase()
+                    when {
+                        lower2.contains("email") && (lower2.contains("check") ||
+                            lower2.contains("read") || lower2.contains("inbox")) -> {
+                            notify("📧 Email monitor is ${if (com.aigentik.app.email.EmailMonitor.isRunning()) "active ✅" else "stopped ❌"}.
+" +
+                                   "New emails appear here automatically.
+" +
+                                   "Channels:
+${ChannelManager.statusSummary()}")
+                        }
+                        (lower2.contains("number") || lower2.contains("phone")) &&
+                            (lower2.contains("what") || lower2.contains("get") ||
+                             lower2.contains("find")) -> {
+                            // Extract name — remove question words
+                            val name = lower2
+                                .replace(Regex("what.?s|what is|get|find|phone|number|'s|\?"), "")
+                                .trim()
+                            if (name.isNotEmpty()) {
+                                val contact = ContactEngine.findContact(name)
+                                    ?: ContactEngine.findByRelationship(name)
+                                    ?: ContactEngine.findAllByName(name).firstOrNull()
+                                if (contact != null) {
+                                    val phones = contact.phones.joinToString(", ").ifEmpty { "no phone on file" }
+                                    notify("📒 ${contact.name ?: name}: $phones")
+                                } else {
+                                    notify("No contact found for "$name".")
+                                }
+                            } else {
+                                notify("Who's number are you looking for?")
+                            }
+                        }
+                        lower2.contains("text") || lower2.contains("sms") -> {
+                            // Re-parse as send_sms with simple parser
+                            val fallback = AiEngine.parseSimpleCommandPublic(input)
+                            if (fallback.action == "send_sms" && fallback.target != null) {
+                                val contact = ContactEngine.findContact(fallback.target)
+                                    ?: ContactEngine.findByRelationship(fallback.target)
+                                val toNumber = contact?.phones?.firstOrNull() ?: fallback.target
+                                val msg = AiEngine.generateSmsReply(
+                                    contact?.name, toNumber,
+                                    fallback.content ?: input, contact?.relationship, contact?.instructions
+                                )
+                                com.aigentik.app.sms.SmsRouter.send(toNumber, msg)
+                                notify("✅ Text sent to ${contact?.name ?: fallback.target}")
+                            } else {
+                                notify("Who should I text, and what should I say?")
+                            }
+                        }
+                        else -> {
+                            // Genuine conversation — use AI
+                            if (AiEngine.isReady()) {
+                                val reply = AiEngine.generateSmsReply(
+                                    ownerName, adminNumber, input, null, null
+                                )
+                                notify(reply)
+                            } else {
+                                notify("Try: status, channels, find [name], text [name] [msg], " +
+                                       "stop/start sms/email/gvoice")
+                            }
+                        }
                     }
                 }
             }
