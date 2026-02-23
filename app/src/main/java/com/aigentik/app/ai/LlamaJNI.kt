@@ -2,72 +2,99 @@ package com.aigentik.app.ai
 
 import android.util.Log
 
-// LlamaJNI v0.9.1 fix — native functions prefixed with "native"
-// to avoid Kotlin overload conflicts with public wrapper functions
-class LlamaJNI {
+// LlamaJNI v0.9.4 — Kotlin-side mutex prevents concurrent JNI calls
+// Native side also has std::mutex — double protection against re-entrancy
+// All native calls must happen on Dispatchers.IO — never on Main thread
+class LlamaJNI private constructor() {
 
     companion object {
         private const val TAG = "LlamaJNI"
-        private const val DEFAULT_CTX = 2048
+        private var instance: LlamaJNI? = null
 
-        @Volatile private var instance: LlamaJNI? = null
-
-        fun getInstance(): LlamaJNI = instance ?: synchronized(this) {
-            instance ?: LlamaJNI().also { instance = it }
-        }
-
-        init {
-            try {
-                System.loadLibrary("aigentik_llama")
-                Log.i(TAG, "Native library loaded")
-            } catch (e: UnsatisfiedLinkError) {
-                Log.e(TAG, "Native library load failed: ${e.message}")
+        fun getInstance(): LlamaJNI {
+            return instance ?: synchronized(this) {
+                instance ?: LlamaJNI().also {
+                    it.loadNativeLib()
+                    instance = it
+                }
             }
         }
     }
 
-    // Public API — called by AiEngine
-    fun loadModel(path: String, nCtx: Int = DEFAULT_CTX): Boolean {
-        return try {
-            nativeLoadModel(path, nCtx)
+    // Kotlin-side lock — prevents two coroutines calling nativeGenerate simultaneously
+    private val lock = java.util.concurrent.locks.ReentrantLock()
+
+    private fun loadNativeLib() {
+        try {
+            System.loadLibrary("aigentik_llama")
+            Log.i(TAG, "Native library loaded")
         } catch (e: UnsatisfiedLinkError) {
-            Log.e(TAG, "loadModel JNI error: ${e.message}")
-            false
+            Log.e(TAG, "Failed to load native library: ${e.message}")
         }
     }
 
+    fun loadModel(path: String): Boolean {
+        return try {
+            lock.lock()
+            nativeLoadModel(path)
+        } catch (e: UnsatisfiedLinkError) {
+            Log.e(TAG, "loadModel UnsatisfiedLinkError: ${e.message}")
+            false
+        } finally {
+            lock.unlock()
+        }
+    }
+
+    // NOTE: This blocks the calling thread during generation (can be 5-30s)
+    // Always call from Dispatchers.IO — never from Main thread
     fun generate(prompt: String, maxTokens: Int = 256): String {
         return try {
+            lock.lock()
             nativeGenerate(prompt, maxTokens)
         } catch (e: UnsatisfiedLinkError) {
-            Log.e(TAG, "generate JNI error: ${e.message}")
+            Log.e(TAG, "generate UnsatisfiedLinkError: ${e.message}")
             ""
+        } finally {
+            lock.unlock()
         }
     }
 
     fun isLoaded(): Boolean {
-        return try { nativeIsLoaded() }
-        catch (e: UnsatisfiedLinkError) { false }
+        return try {
+            nativeIsLoaded()
+        } catch (e: UnsatisfiedLinkError) {
+            false
+        }
     }
 
     fun unload() {
-        try { nativeUnload() }
-        catch (e: UnsatisfiedLinkError) { Log.e(TAG, "unload JNI error") }
+        try {
+            lock.lock()
+            nativeUnload()
+        } catch (e: UnsatisfiedLinkError) {
+            Log.e(TAG, "unload error: ${e.message}")
+        } finally {
+            lock.unlock()
+        }
     }
 
     fun getModelInfo(): String {
-        return try { nativeGetModelInfo() }
-        catch (e: UnsatisfiedLinkError) { "Native library not available" }
+        return try {
+            nativeGetModelInfo()
+        } catch (e: UnsatisfiedLinkError) {
+            "Native library not available"
+        }
     }
 
-    // Build Qwen3 ChatML format prompt
-    fun buildChatPrompt(systemMsg: String, userMsg: String): String =
-        "<|im_start|>system\n$systemMsg<|im_end|>\n" +
-        "<|im_start|>user\n$userMsg<|im_end|>\n" +
-        "<|im_start|>assistant\n"
+    // Chat prompt formatter for Qwen3 ChatML format
+    fun buildChatPrompt(systemPrompt: String, userMessage: String): String {
+        return "<|im_start|>system\n$systemPrompt<|im_end|>\n" +
+               "<|im_start|>user\n$userMessage<|im_end|>\n" +
+               "<|im_start|>assistant\n"
+    }
 
-    // Native declarations — names match JNI function names in llama_jni.cpp
-    private external fun nativeLoadModel(path: String, nCtx: Int): Boolean
+    // Native declarations — prefixed to avoid Kotlin overload conflicts
+    private external fun nativeLoadModel(path: String): Boolean
     private external fun nativeGenerate(prompt: String, maxTokens: Int): String
     private external fun nativeIsLoaded(): Boolean
     private external fun nativeUnload()
