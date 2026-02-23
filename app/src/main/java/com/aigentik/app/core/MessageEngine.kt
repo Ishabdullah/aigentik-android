@@ -2,20 +2,21 @@ package com.aigentik.app.core
 
 import android.util.Log
 import com.aigentik.app.ai.AiEngine
+import com.aigentik.app.email.EmailMonitor
 import com.aigentik.app.email.EmailRouter
+import com.aigentik.app.email.GmailClient
 import com.aigentik.app.sms.SmsRouter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-// MessageEngine v1.0
-// New in this version:
+// MessageEngine v1.1
 // - Channel toggle commands (stop/start sms/email/gvoice/all)
-// - Reply routing: SMS replies go via SmsRouter, email via EmailRouter
+// - Reply routing: SMS via SmsRouter, email via EmailRouter
 // - Chat notification callback — notifications appear in chat history
-// - Regular email handling (was NOTE: v0.7 placeholder before)
-// - "text [name] [message]" now actually sends SMS via SmsRouter
+// - check_email, get_contact_phone, send_email command handlers
+// - Keyword fallback for unrecognized commands before AI chat
 object MessageEngine {
 
     private const val TAG = "MessageEngine"
@@ -26,8 +27,7 @@ object MessageEngine {
     private var agentName    = "Aigentik"
     private var ownerNotifier: ((String) -> Unit)? = null
 
-    // chatNotifier posts messages to the in-app chat Room database
-    // Set by ChatActivity or AigentikService on startup
+    // chatNotifier posts messages into Room DB so they appear in chat history
     var chatNotifier: ((String) -> Unit)? = null
 
     fun configure(
@@ -44,7 +44,6 @@ object MessageEngine {
         Log.i(TAG, "$agentName MessageEngine configured")
     }
 
-    // Notify owner via notification + chat simultaneously
     private fun notify(message: String) {
         ownerNotifier?.invoke(message)
         chatNotifier?.invoke(message)
@@ -53,7 +52,7 @@ object MessageEngine {
     fun onMessageReceived(message: Message) {
         Log.i(TAG, "Message from ${message.sender} via ${message.channel}")
         if (AigentikSettings.isPaused) {
-            Log.i(TAG, "System paused — ignoring message")
+            Log.i(TAG, "System paused — ignoring")
             return
         }
         val senderNorm = message.sender.filter { it.isDigit() }.takeLast(10)
@@ -71,28 +70,25 @@ object MessageEngine {
         val input = message.body.trim()
         val lower = input.lowercase()
 
-        // Channel toggle commands — check before AI interpretation
-        // Patterns: "stop monitoring email", "start sms", "pause google voice", etc.
+        // Channel toggle — check before AI interpretation
         val channelToggle = ChannelManager.parseToggleCommand(lower)
         if (channelToggle != null) {
             val (channel, enable) = channelToggle
-            // Check for "all" keyword
             if (lower.contains("all") || lower.contains("everything")) {
                 ChannelManager.Channel.values().forEach { ch ->
                     if (enable) ChannelManager.enable(ch) else ChannelManager.disable(ch)
                 }
-                notify(if (enable) "✅ All channels enabled:\n${ChannelManager.statusSummary()}"
-                       else "⏸ All channels paused:\n${ChannelManager.statusSummary()}")
+                val verb = if (enable) "enabled" else "paused"
+                notify("${if (enable) "✅" else "⏸"} All channels $verb:\n${ChannelManager.statusSummary()}")
             } else {
                 if (enable) ChannelManager.enable(channel) else ChannelManager.disable(channel)
-                notify("${if (enable) "✅" else "⏸"} ${channel.name} channel " +
-                       "${if (enable) "enabled" else "paused"}.\n${ChannelManager.statusSummary()}")
+                val verb = if (enable) "enabled" else "paused"
+                notify("${if (enable) "✅" else "⏸"} ${channel.name} $verb.\n${ChannelManager.statusSummary()}")
             }
             return
         }
 
-        // Channel status query
-        if (lower.contains("channel") || lower == "channels") {
+        if (lower == "channels" || lower.contains("channel status")) {
             notify("📡 Channel Status:\n${ChannelManager.statusSummary()}")
             return
         }
@@ -102,20 +98,18 @@ object MessageEngine {
             Log.i(TAG, "Command: ${result.action} target=${result.target}")
 
             when (result.action) {
+
                 "find_contact" -> {
-                    val target = result.target ?: run {
-                        notify("Who are you looking for?")
-                        return
-                    }
+                    val target = result.target ?: run { notify("Who are you looking for?"); return }
                     val matches = ContactEngine.findAllByName(target)
                     when {
                         matches.isEmpty() -> {
                             val exact = ContactEngine.findContact(target)
                                 ?: ContactEngine.findByRelationship(target)
-                            notify(if (exact != null)
-                                "📒 Found:\n${ContactEngine.formatContact(exact)}"
-                            else
-                                "No contact found for \"$target\".")
+                            notify(
+                                if (exact != null) "📒 Found:\n${ContactEngine.formatContact(exact)}"
+                                else "No contact found for \"$target\"."
+                            )
                         }
                         matches.size == 1 ->
                             notify("📒 Found:\n${ContactEngine.formatContact(matches[0])}")
@@ -125,6 +119,20 @@ object MessageEngine {
                             }.joinToString("\n")
                             notify("Found ${matches.size} matching \"$target\":\n$names")
                         }
+                    }
+                }
+
+                "get_contact_phone", "contact_phone", "phone_number" -> {
+                    val target = result.target ?: run { notify("Who are you looking for?"); return }
+                    val contact = ContactEngine.findContact(target)
+                        ?: ContactEngine.findByRelationship(target)
+                        ?: ContactEngine.findAllByName(target).firstOrNull()
+                    if (contact != null) {
+                        val phones = contact.phones.joinToString(", ").ifEmpty { "no phone on file" }
+                        val emails = contact.emails.joinToString(", ").ifEmpty { "no email on file" }
+                        notify("📒 ${contact.name ?: target}:\n📞 $phones\n📧 $emails")
+                    } else {
+                        notify("No contact found for \"$target\". Try 'find $target'.")
                     }
                 }
 
@@ -148,10 +156,10 @@ object MessageEngine {
                 }
 
                 "status" -> {
-                    notify("✅ $agentName Status:\n" +
-                        "🤖 AI: ${if (AiEngine.isReady()) "online" else "offline"}\n" +
-                        "👥 Contacts: ${ContactEngine.getCount()}\n" +
-                        "📡 Channels:\n${ChannelManager.statusSummary()}")
+                    val ai = if (AiEngine.isReady()) "online" else "offline"
+                    val contacts = ContactEngine.getCount()
+                    val channels = ChannelManager.statusSummary()
+                    notify("✅ $agentName Status:\n🤖 AI: $ai\n👥 Contacts: $contacts\n📡 Channels:\n$channels")
                 }
 
                 "send_sms" -> {
@@ -160,23 +168,14 @@ object MessageEngine {
                     val contact = ContactEngine.findContact(target)
                         ?: ContactEngine.findByRelationship(target)
                     val toNumber = contact?.phones?.firstOrNull() ?: target
-
                     val naturalMsg = AiEngine.generateSmsReply(
                         contact?.name, toNumber, content,
                         contact?.relationship, contact?.instructions
                     )
-                    // Send via SMS directly (owner-initiated texts go via SmsRouter)
                     SmsRouter.send(toNumber, naturalMsg)
-                    notify("✅ Text sent to ${contact?.name ?: target}:\n\"${naturalMsg.take(100)}\"")
-                }
-
-                "check_email", "read_email", "list_email" -> {
-                    // Owner asking to see recent emails
-                    notify("📧 Checking emails... I monitor your Gmail automatically.
-" +
-                           "Any new messages from real people will appear here.
-" +
-                           "Say 'email status' to see connection status.")
+                    val name = contact?.name ?: target
+                    val preview = naturalMsg.take(100)
+                    notify("✅ Text sent to $name:\n\"$preview\"")
                 }
 
                 "send_email" -> {
@@ -187,50 +186,52 @@ object MessageEngine {
                     val toEmail = contact?.emails?.firstOrNull() ?: target
                     scope.launch {
                         val body = AiEngine.generateEmailReply(
-                            contact?.name, toEmail, "Message from $ownerName", content,
+                            contact?.name, toEmail,
+                            "Message from $ownerName", content,
                             contact?.relationship, contact?.instructions
                         )
-                        val sent = com.aigentik.app.email.GmailClient.sendEmail(toEmail, "Hi from $ownerName", body)
-                        notify(if (sent) "✅ Email sent to ${contact?.name ?: target}"
-                               else "❌ Failed to send email to ${contact?.name ?: target}")
+                        val subject = "Hi from $ownerName"
+                        val sent = GmailClient.sendEmail(toEmail, subject, body)
+                        val name = contact?.name ?: target
+                        notify(if (sent) "✅ Email sent to $name" else "❌ Failed to email $name")
                     }
                 }
 
-                "get_contact_phone", "contact_phone", "phone_number" -> {
-                    val target = result.target ?: run { notify("Who are you looking for?"); return }
-                    val contact = ContactEngine.findContact(target)
-                        ?: ContactEngine.findByRelationship(target)
-                        ?: ContactEngine.findAllByName(target).firstOrNull()
-                    if (contact != null) {
-                        val phones = contact.phones.joinToString(", ").ifEmpty { "no phone on file" }
-                        val emails = contact.emails.joinToString(", ").ifEmpty { "no email on file" }
-                        notify("📒 ${contact.name ?: target}:
-📞 $phones
-📧 $emails")
-                    } else {
-                        notify("No contact found for "$target". Try 'find $target'.")
-                    }
+                "check_email", "read_email", "list_email" -> {
+                    val running = EmailMonitor.isRunning()
+                    val status = if (running) "active ✅" else "stopped ❌"
+                    val connected = if (GmailClient.isConnected()) "connected" else "disconnected"
+                    notify("📧 Email monitor: $status\nGmail: $connected\nNew emails appear here automatically.\nChannels:\n${ChannelManager.statusSummary()}")
+                }
+
+                "sync_contacts" -> {
+                    notify("✅ Contacts: ${ContactEngine.getCount()} loaded")
                 }
 
                 else -> {
-                    // For truly unknown commands — try keyword routing before giving up
+                    // Keyword fallback before general AI chat
                     val lower2 = input.lowercase()
                     when {
                         lower2.contains("email") && (lower2.contains("check") ||
                             lower2.contains("read") || lower2.contains("inbox")) -> {
-                            notify("📧 Email monitor is ${if (com.aigentik.app.email.EmailMonitor.isRunning()) "active ✅" else "stopped ❌"}.
-" +
-                                   "New emails appear here automatically.
-" +
-                                   "Channels:
-${ChannelManager.statusSummary()}")
+                            val running = EmailMonitor.isRunning()
+                            val st = if (running) "active ✅" else "stopped ❌"
+                            notify("📧 Email monitor: $st\nNew emails appear here automatically.\n${ChannelManager.statusSummary()}")
                         }
+
                         (lower2.contains("number") || lower2.contains("phone")) &&
                             (lower2.contains("what") || lower2.contains("get") ||
-                             lower2.contains("find")) -> {
-                            // Extract name — remove question words
+                             lower2.contains("find") || lower2.contains("whats")) -> {
                             val name = lower2
-                                .replace(Regex("what.?s|what is|get|find|phone|number|'s|\?"), "")
+                                .replace("what's", "")
+                                .replace("whats", "")
+                                .replace("what is", "")
+                                .replace("get", "")
+                                .replace("find", "")
+                                .replace("phone", "")
+                                .replace("number", "")
+                                .replace("'s", "")
+                                .replace("?", "")
                                 .trim()
                             if (name.isNotEmpty()) {
                                 val contact = ContactEngine.findContact(name)
@@ -240,14 +241,14 @@ ${ChannelManager.statusSummary()}")
                                     val phones = contact.phones.joinToString(", ").ifEmpty { "no phone on file" }
                                     notify("📒 ${contact.name ?: name}: $phones")
                                 } else {
-                                    notify("No contact found for "$name".")
+                                    notify("No contact found for \"$name\".")
                                 }
                             } else {
                                 notify("Who's number are you looking for?")
                             }
                         }
-                        lower2.contains("text") || lower2.contains("sms") -> {
-                            // Re-parse as send_sms with simple parser
+
+                        lower2.startsWith("text ") || lower2.startsWith("send ") -> {
                             val fallback = AiEngine.parseSimpleCommandPublic(input)
                             if (fallback.action == "send_sms" && fallback.target != null) {
                                 val contact = ContactEngine.findContact(fallback.target)
@@ -255,14 +256,17 @@ ${ChannelManager.statusSummary()}")
                                 val toNumber = contact?.phones?.firstOrNull() ?: fallback.target
                                 val msg = AiEngine.generateSmsReply(
                                     contact?.name, toNumber,
-                                    fallback.content ?: input, contact?.relationship, contact?.instructions
+                                    fallback.content ?: input,
+                                    contact?.relationship, contact?.instructions
                                 )
-                                com.aigentik.app.sms.SmsRouter.send(toNumber, msg)
-                                notify("✅ Text sent to ${contact?.name ?: fallback.target}")
+                                SmsRouter.send(toNumber, msg)
+                                val name = contact?.name ?: fallback.target
+                                notify("✅ Text sent to $name")
                             } else {
                                 notify("Who should I text, and what should I say?")
                             }
                         }
+
                         else -> {
                             // Genuine conversation — use AI
                             if (AiEngine.isReady()) {
@@ -271,8 +275,7 @@ ${ChannelManager.statusSummary()}")
                                 )
                                 notify(reply)
                             } else {
-                                notify("Try: status, channels, find [name], text [name] [msg], " +
-                                       "stop/start sms/email/gvoice")
+                                notify("Try: status, channels, find [name], text [name] [msg], stop/start sms/email/gvoice")
                             }
                         }
                     }
@@ -305,8 +308,9 @@ ${ChannelManager.statusSummary()}")
                 ruleAction == RuleEngine.Action.AUTO_REPLY
 
             if (message.body.lowercase().contains(ownerName.lowercase())) {
-                notify("🚨 URGENT: ${contact.name ?: message.sender} mentioned your name!\n" +
-                       "\"${message.body.take(100)}\"")
+                val sender = contact.name ?: message.sender
+                val preview = message.body.take(100)
+                notify("🚨 URGENT: $sender mentioned your name!\n\"$preview\"")
             }
 
             if (shouldAutoReply) {
@@ -318,9 +322,7 @@ ${ChannelManager.statusSummary()}")
                     contact.instructions
                 )
 
-                // Route reply based on message channel
-                // NOTE: Gemini audit — NOTIFICATION/RCS must use SmsRouter not EmailRouter
-                // EmailRouter has no context for RCS messages and falls back incorrectly
+                // Route by channel — NOTIFICATION/RCS goes to SmsRouter not EmailRouter
                 when (message.channel) {
                     Message.Channel.SMS          -> SmsRouter.send(message.sender, reply)
                     Message.Channel.NOTIFICATION -> SmsRouter.send(message.sender, reply)
@@ -328,13 +330,15 @@ ${ChannelManager.statusSummary()}")
                     else                         -> SmsRouter.send(message.sender, reply)
                 }
 
-                notify("💬 Auto-replied to ${contact.name ?: message.sender}:\n" +
-                       "They said: \"${message.body.take(60)}\"\n" +
-                       "Sent: \"${reply.take(80)}\"")
+                val sender = contact.name ?: message.sender
+                val inbound = message.body.take(60)
+                val outbound = reply.take(80)
+                notify("💬 Auto-replied to $sender:\nThey said: \"$inbound\"\nSent: \"$outbound\"")
             } else {
-                notify("💬 New message from ${contact.name ?: message.sender} " +
-                       "[${message.channel}]:\n\"${message.body.take(100)}\"\n\n" +
-                       "Say \"always reply to ${contact.name ?: message.sender}\" to auto-reply")
+                val sender = contact.name ?: message.sender
+                val preview = message.body.take(100)
+                val ch = message.channel
+                notify("💬 New message from $sender [$ch]:\n\"$preview\"\n\nSay \"always reply to $sender\" to auto-reply")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Public message failed: ${e.message}")
