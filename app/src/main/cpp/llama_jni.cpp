@@ -93,7 +93,7 @@ Java_com_aigentik_app_ai_LlamaJNI_nativeGenerate(
     llama_batch batch = llama_batch_init((int)tokens.size(), 0, 1);
 
     // NOTE: llama_batch_clear zeros n_tokens — MUST call before filling
-    llama_batch_clear(batch);
+    batch.n_tokens = 0;
 
     for (int i = 0; i < n; i++) {
         batch.token[i]     = tokens[i];
@@ -125,7 +125,7 @@ Java_com_aigentik_app_ai_LlamaJNI_nativeGenerate(
         if (len > 0) result.append(piece, len);
 
         // NOTE: batch_clear + single token batch for each new token
-        llama_batch_clear(batch);
+        batch.n_tokens = 0;
         batch.token[0]     = tok;
         batch.pos[0]       = pos;
         batch.n_seq_id[0]  = 1;
