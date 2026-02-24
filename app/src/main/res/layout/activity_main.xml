@@ -113,7 +113,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="⏳"
-                    android:textSize="28sp"/>
+                    android:textSize="20sp"/>
 
                 <TextView
                     android:layout_width="wrap_content"
@@ -165,7 +165,35 @@
                 android:layout_height="wrap_content"
                 android:text="📱 RCS: monitoring"
                 android:textColor="#AAAAAA"
-                android:textSize="14sp"/>
+                android:textSize="14sp"
+                android:layout_marginBottom="8dp"/>
+
+            <TextView
+                android:id="@+id/tvChannelStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="📡 SMS 🟢 | GVoice 🟢 | Email 🟢"
+                android:textColor="#AAAAAA"
+                android:textSize="13sp"
+                android:layout_marginBottom="8dp"/>
+
+            <TextView
+                android:id="@+id/tvNotificationAccess"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🔔 Notification Access: checking..."
+                android:textColor="#AAAAAA"
+                android:textSize="13sp"
+                android:layout_marginBottom="8dp"/>
+
+            <TextView
+                android:id="@+id/tvModelInfo"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="📊 No model loaded"
+                android:textColor="#666666"
+                android:textSize="11sp"
+                android:fontFamily="monospace"/>
         </LinearLayout>
 
         <!-- Activity Log -->
