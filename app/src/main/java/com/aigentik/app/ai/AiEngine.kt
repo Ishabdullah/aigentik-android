@@ -4,8 +4,13 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-// AiEngine v0.9.1 — uses LlamaJNI for fully offline AI
-// Falls back to template responses if model not loaded
+// AiEngine v1.1
+// Changes from v0.9.1:
+//   - warmUp() called after load — primes JIT and KV cache so first reply is fast
+//   - WARMING state added — dashboard shows loading progress accurately
+//   - SMS max tokens 200 → 256, email 400 → 512 (uses 8k context properly)
+//   - Email body intake 600 → 2000 chars (more context for better replies)
+//   - getStateLabel() for dashboard display
 object AiEngine {
 
     private const val TAG = "AiEngine"
@@ -14,12 +19,7 @@ object AiEngine {
     private var ownerName = "Ish"
     private val llama = LlamaJNI.getInstance()
 
-    enum class State {
-        NOT_LOADED,   // Model file not found
-        LOADING,      // Currently loading
-        READY,        // Model loaded and ready
-        ERROR         // Failed to load
-    }
+    enum class State { NOT_LOADED, LOADING, WARMING, READY, ERROR }
 
     @Volatile var state = State.NOT_LOADED
         private set
@@ -29,29 +29,58 @@ object AiEngine {
         this.ownerName = ownerName
     }
 
-    // Load model from path
+    // Load model then warm up — called by AigentikService on startup
+    // NOT on first message — ensures first reply has no cold-start delay
     suspend fun loadModel(modelPath: String): Boolean = withContext(Dispatchers.IO) {
-        if (state == State.LOADING) return@withContext false
-
+        if (state == State.LOADING || state == State.WARMING) {
+            Log.w(TAG, "Load already in progress")
+            return@withContext false
+        }
         state = State.LOADING
         Log.i(TAG, "Loading model: $modelPath")
 
-        val success = llama.loadModel(modelPath)
-        state = if (success) {
-            Log.i(TAG, "Model ready — ${llama.getModelInfo()}")
-            State.READY
-        } else {
+        val loaded = llama.loadModel(modelPath)
+        if (!loaded) {
             Log.e(TAG, "Model load failed")
-            State.ERROR
+            state = State.ERROR
+            return@withContext false
         }
-        success
+
+        Log.i(TAG, "Model loaded — ${llama.getModelInfo()}")
+        state = State.WARMING
+        warmUp()
+        state = State.READY
+        Log.i(TAG, "Model ready and warmed up")
+        true
+    }
+
+    // Warm-up: fire a trivial prompt to prime JIT compilation and KV cache
+    // 4 tokens is enough — takes ~2s but saves 2s on the first real message
+    private fun warmUp() {
+        try {
+            Log.i(TAG, "Warming up...")
+            val prompt = llama.buildChatPrompt("You are a helpful assistant.", "Hello")
+            val result = llama.generate(prompt, 4)
+            Log.i(TAG, "Warm-up done — ${result.length} chars")
+        } catch (e: Exception) {
+            // Non-fatal — model still works, first call just slower
+            Log.w(TAG, "Warm-up failed (non-fatal): ${e.message}")
+        }
     }
 
     fun isReady() = state == State.READY
 
-    fun getModelInfo(): String = if (isReady()) llama.getModelInfo() else "Not loaded"
+    fun getModelInfo(): String = if (llama.isLoaded()) llama.getModelInfo() else "Not loaded"
 
-    // Generate SMS reply
+    fun getStateLabel(): String = when (state) {
+        State.NOT_LOADED -> "Not loaded"
+        State.LOADING    -> "Loading..."
+        State.WARMING    -> "Warming up..."
+        State.READY      -> "Ready"
+        State.ERROR      -> "Error"
+    }
+
+    // Generate SMS reply — 256 tokens
     suspend fun generateSmsReply(
         senderName: String?,
         senderPhone: String,
@@ -64,30 +93,26 @@ object AiEngine {
             "include \"$ownerName\" in your message."
 
         if (!isReady()) {
-            Log.w(TAG, "Model not loaded — using fallback reply")
+            Log.w(TAG, "Model not ready — using fallback")
             return@withContext fallbackSmsReply(senderName, senderPhone) + signature
         }
 
-        val instructionText = instructions?.let { "IMPORTANT: $it. " } ?: ""
-        val relText = relationship?.let { "Relationship: $it. " } ?: ""
-
         val systemMsg = "You are $agentName, an AI personal assistant for $ownerName. " +
-            "Reply to a text message sent to $ownerName from " +
-            "${senderName ?: senderPhone}. " +
-            "$relText$instructionText" +
+            "Reply to a text message sent to $ownerName from ${senderName ?: senderPhone}. " +
+            (relationship?.let { "Relationship: $it. " } ?: "") +
+            (instructions?.let { "IMPORTANT: $it. " } ?: "") +
             "Be concise and natural — this is a text message. " +
             "Do NOT add a signature. Reply with message text only."
 
-        val userMsg = "Reply to: \"$message\" from ${senderName ?: senderPhone}"
-
-        val prompt = llama.buildChatPrompt(systemMsg, userMsg)
-        val reply = llama.generate(prompt, 200).trim()
+        val prompt = llama.buildChatPrompt(systemMsg,
+            "Reply to: \"$message\" from ${senderName ?: senderPhone}")
+        val reply = llama.generate(prompt, 256).trim()
 
         if (reply.isEmpty()) fallbackSmsReply(senderName, senderPhone) + signature
         else reply + signature
     }
 
-    // Generate email reply
+    // Generate email reply — 512 tokens, up to 2000 char body
     suspend fun generateEmailReply(
         fromName: String?,
         fromEmail: String,
@@ -103,18 +128,15 @@ object AiEngine {
             return@withContext fallbackEmailReply(fromName, fromEmail) + signature
         }
 
-        val instructionText = instructions?.let { "IMPORTANT: $it. " } ?: ""
-        val relText = relationship?.let { "Relationship: $it. " } ?: ""
-
         val systemMsg = "You are $agentName, an AI personal assistant for $ownerName. " +
             "Reply to an email sent to $ownerName from ${fromName ?: fromEmail}. " +
-            "$relText$instructionText" +
+            (relationship?.let { "Relationship: $it. " } ?: "") +
+            (instructions?.let { "IMPORTANT: $it. " } ?: "") +
             "Be professional and natural. Do NOT add a signature."
 
-        val userMsg = "Subject: $subject\nBody: ${body.take(600)}\n\nWrite a reply."
-
-        val prompt = llama.buildChatPrompt(systemMsg, userMsg)
-        val reply = llama.generate(prompt, 400).trim()
+        val prompt = llama.buildChatPrompt(systemMsg,
+            "Subject: $subject\nBody: ${body.take(2000)}\n\nWrite a reply.")
+        val reply = llama.generate(prompt, 512).trim()
 
         if (reply.isEmpty()) fallbackEmailReply(fromName, fromEmail) + signature
         else reply + signature
@@ -123,25 +145,20 @@ object AiEngine {
     // Interpret natural language admin command
     suspend fun interpretCommand(commandText: String): CommandResult =
         withContext(Dispatchers.IO) {
-            if (!isReady()) {
-                return@withContext parseSimpleCommand(commandText)
-            }
+            if (!isReady()) return@withContext parseSimpleCommand(commandText)
 
             val systemMsg = "You interpret commands for an AI assistant. " +
-                "Return ONLY valid JSON: " +
-                "{\"action\":\"string\",\"target\":\"string or null\"," +
-                "\"content\":\"string or null\"} " +
-                "Actions: send_sms, find_contact, never_reply_to, always_reply_to, " +
-                "list_contacts, sync_contacts, add_rule, remove_rule, list_rules, " +
-                "status, pause_all, resume_all, unknown. " +
+                "Return ONLY valid JSON with no extra text: " +
+                "{\"action\":\"string\",\"target\":\"string or null\",\"content\":\"string or null\"} " +
+                "Actions: send_sms, send_email, find_contact, get_contact_phone, " +
+                "never_reply_to, always_reply_to, check_email, " +
+                "list_contacts, sync_contacts, status, unknown. " +
                 "Examples: " +
-                "\"text mom I love her\" -> {\"action\":\"send_sms\",\"target\":\"mom\",\"content\":\"I love her\"} " +
-                "\"find Mike\" -> {\"action\":\"find_contact\",\"target\":\"Mike\"} " +
-                "\"never reply to spammer\" -> {\"action\":\"never_reply_to\",\"target\":\"spammer\"}"
+                "\"text mom I'll be late\" -> {\"action\":\"send_sms\",\"target\":\"mom\",\"content\":\"I'll be late\"} " +
+                "\"what's Sarah's number\" -> {\"action\":\"get_contact_phone\",\"target\":\"Sarah\",\"content\":null} " +
+                "\"check my emails\" -> {\"action\":\"check_email\",\"target\":null,\"content\":null}"
 
-            val userMsg = "Command: \"$commandText\""
-            val prompt = llama.buildChatPrompt(systemMsg, userMsg)
-
+            val prompt = llama.buildChatPrompt(systemMsg, "Command: \"$commandText\"")
             try {
                 val raw = llama.generate(prompt, 100).trim()
                 val clean = raw.replace(Regex("```json|```|<\\|im_end\\|>.*"), "").trim()
@@ -152,28 +169,19 @@ object AiEngine {
             }
         }
 
-    // Detect message tone
-    suspend fun detectTone(message: String): String = withContext(Dispatchers.IO) {
-        if (!isReady()) return@withContext "neutral"
-        val systemMsg = "Detect tone. Reply ONE word only: " +
-            "casual, formal, urgent, friendly, angry, or neutral."
-        val prompt = llama.buildChatPrompt(systemMsg, message)
-        llama.generate(prompt, 5).trim().lowercase().ifEmpty { "neutral" }
-    }
-
-    // Simple rule-based command parser used as fallback when model not loaded
-    // Public so MessageEngine can use it as keyword fallback
     fun parseSimpleCommandPublic(text: String): CommandResult = parseSimpleCommand(text)
 
     private fun parseSimpleCommand(text: String): CommandResult {
         val lower = text.lowercase().trim()
         return when {
             lower.startsWith("text ") || lower.startsWith("send text") -> {
-                val parts = lower.removePrefix("text ").removePrefix("send text ").trim().split(" ", limit = 2)
+                val rest = lower.removePrefix("text ").removePrefix("send text ").trim()
+                val parts = rest.split(" ", limit = 2)
                 CommandResult("send_sms", parts.getOrNull(0), parts.getOrNull(1), false)
             }
             lower.startsWith("email ") || lower.startsWith("send email") -> {
-                val parts = lower.removePrefix("email ").removePrefix("send email ").trim().split(" ", limit = 2)
+                val rest = lower.removePrefix("email ").removePrefix("send email ").trim()
+                val parts = rest.split(" ", limit = 2)
                 CommandResult("send_email", parts.getOrNull(0), parts.getOrNull(1), false)
             }
             lower.contains("check") && lower.contains("email") ->
@@ -183,11 +191,14 @@ object AiEngine {
                 CommandResult("get_contact_phone", name.ifEmpty { null }, null, false)
             }
             lower.startsWith("find ") || lower.startsWith("look up ") ->
-                CommandResult("find_contact", lower.removePrefix("find ").removePrefix("look up ").trim(), null, false)
+                CommandResult("find_contact",
+                    lower.removePrefix("find ").removePrefix("look up ").trim(), null, false)
             lower.contains("never reply") ->
-                CommandResult("never_reply_to", lower.substringAfter("never reply to ").trim(), null, false)
+                CommandResult("never_reply_to",
+                    lower.substringAfter("never reply to ").trim(), null, false)
             lower.contains("always reply") ->
-                CommandResult("always_reply_to", lower.substringAfter("always reply to ").trim(), null, false)
+                CommandResult("always_reply_to",
+                    lower.substringAfter("always reply to ").trim(), null, false)
             lower == "status" || lower == "check status" ->
                 CommandResult("status", null, null, false)
             lower.contains("sync") && lower.contains("contact") ->
@@ -201,8 +212,8 @@ object AiEngine {
     }
 
     private fun parseCommandJson(json: String): CommandResult {
-        val action = extractJsonValue(json, "action") ?: "unknown"
-        val target = extractJsonValue(json, "target")
+        val action  = extractJsonValue(json, "action") ?: "unknown"
+        val target  = extractJsonValue(json, "target")
         val content = extractJsonValue(json, "content")
         return CommandResult(action, target, content, false)
     }
@@ -214,19 +225,15 @@ object AiEngine {
         }
     }
 
-    // Fallback replies when model not loaded
-    private fun fallbackSmsReply(senderName: String?, phone: String): String {
-        return "Hi ${senderName ?: "there"}, $agentName here — " +
-               "personal AI assistant for $ownerName. " +
-               "$ownerName will get back to you soon."
-    }
+    private fun fallbackSmsReply(senderName: String?, phone: String): String =
+        "Hi ${senderName ?: "there"}, $agentName here — " +
+        "personal AI assistant for $ownerName. " +
+        "$ownerName will get back to you soon."
 
-    private fun fallbackEmailReply(fromName: String?, fromEmail: String): String {
-        return "Hi ${fromName ?: "there"},\n\n" +
-               "This is $agentName, $ownerName's personal AI assistant. " +
-               "I've received your email and will pass it along.\n\n" +
-               "Thank you for reaching out."
-    }
+    private fun fallbackEmailReply(fromName: String?, fromEmail: String): String =
+        "Hi ${fromName ?: "there"},\n\n" +
+        "This is $agentName, $ownerName's personal AI assistant. " +
+        "I've received your email and will pass it along.\n\nThank you for reaching out."
 
     data class CommandResult(
         val action: String,
