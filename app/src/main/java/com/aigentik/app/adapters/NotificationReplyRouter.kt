@@ -33,10 +33,14 @@ object NotificationReplyRouter {
     // Package-specific RemoteInput result key candidates — ordered by likelihood
     // NOTE: Log action titles in testing to confirm OEM differences
     private val REPLY_KEYS = mapOf(
-        "com.samsung.android.messaging"          to listOf("reply", "replyText", "android.intent.extra.text"),
+        "com.samsung.android.messaging"          to listOf("KEY_DIRECT_REPLY", "reply", "replyText", "android.intent.extra.text"),
         "com.google.android.apps.messaging"      to listOf("reply_text", "reply", "android.intent.extra.text")
     )
     private val FALLBACK_KEYS = listOf("reply", "reply_text", "replyText", "android.intent.extra.text")
+
+    // Application context stored for PendingIntent.send() calls
+    // Set by NotificationAdapter.onNotificationPosted() — never null when reply is needed
+    var appContext: android.content.Context? = null
 
     fun register(messageId: String, notification: Notification, packageName: String, sbnKey: String) {
         val entry = ReplyEntry(notification, packageName, sbnKey)
@@ -89,7 +93,13 @@ object NotificationReplyRouter {
 
             // Correct PendingIntent.send() overload for Android 13+ (API 33)
             // send(Context?, Int, Intent?) is the right signature here
-            action.actionIntent.send(null, 0, replyIntent)
+            val ctx = appContext
+            if (ctx != null) {
+                action.actionIntent.send(ctx, 0, replyIntent)
+            } else {
+                // Fallback — try without context (may fail on some Android versions)
+                action.actionIntent.send(0, null, null, null, null)
+            }
 
             Log.i(TAG, "Inline reply sent pkg=${entry.packageName} key=${remoteInput.resultKey} text=${replyText.take(60)}")
             // Clean up after successful send
