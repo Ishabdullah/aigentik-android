@@ -64,8 +64,10 @@ object GmailClient {
     private var pollStore: Store? = null
     private var idleFolder: Folder? = null
 
-    // Skip emails that arrived before app started
-    private val startupTime = System.currentTimeMillis()
+    // On first connect: process emails from last 24h so GVoice texts aren't missed
+    // After first poll: only process truly new emails
+    // 24h window ensures we catch messages that arrived during reinstall/restart
+    private val startupTime = System.currentTimeMillis() - (24 * 60 * 60 * 1000L)
 
     data class ParsedEmail(
         val fromEmail: String,

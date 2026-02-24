@@ -2,6 +2,7 @@ package com.aigentik.app.core
 
 import android.util.Log
 import com.aigentik.app.ai.AiEngine
+import com.aigentik.app.core.PhoneNormalizer
 import com.aigentik.app.email.EmailMonitor
 import com.aigentik.app.email.EmailRouter
 import com.aigentik.app.email.GmailClient
@@ -36,7 +37,7 @@ object MessageEngine {
         agentName: String,
         ownerNotifier: (String) -> Unit
     ) {
-        this.adminNumber  = adminNumber.filter { it.isDigit() }.takeLast(10)
+        this.adminNumber  = PhoneNormalizer.toE164(adminNumber)
         this.ownerName    = ownerName
         this.agentName    = agentName
         this.ownerNotifier = ownerNotifier
@@ -55,8 +56,7 @@ object MessageEngine {
             Log.i(TAG, "System paused — ignoring")
             return
         }
-        val senderNorm = message.sender.filter { it.isDigit() }.takeLast(10)
-        val isAdmin = senderNorm == adminNumber ||
+        val isAdmin = PhoneNormalizer.isSameNumber(message.sender, adminNumber) ||
                       message.sender.lowercase() == AigentikSettings.gmailAddress.lowercase()
 
         scope.launch {

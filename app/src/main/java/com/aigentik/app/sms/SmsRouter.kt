@@ -1,10 +1,9 @@
 package com.aigentik.app.sms
 
-import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
 import android.telephony.SmsManager
 import android.util.Log
+import com.aigentik.app.core.PhoneNormalizer
 
 // SmsRouter v1.0 — sends SMS via SmsManager
 // NOTE: Does NOT require Aigentik to be default SMS app for SENDING

@@ -9,6 +9,7 @@ import com.aigentik.app.core.ChannelManager
 import com.aigentik.app.core.Message
 import com.aigentik.app.core.MessageDeduplicator
 import com.aigentik.app.core.MessageEngine
+import com.aigentik.app.core.PhoneNormalizer
 
 // SmsAdapter v1.0 — receives direct SMS via BroadcastReceiver
 // NOTE: Receives SMS from the Aigentik phone number (non-Google-Voice number)
@@ -46,16 +47,18 @@ class SmsAdapter : BroadcastReceiver() {
             val body = parts.joinToString("") { it.messageBody ?: "" }
             val timestamp = parts.firstOrNull()?.timestampMillis ?: System.currentTimeMillis()
 
-            Log.i(TAG, "SMS from $sender: ${body.take(50)}")
+            // Normalize to E.164 before any processing or comparison
+            val normalizedSender = PhoneNormalizer.toE164(sender)
+            Log.i(TAG, "SMS from $sender → normalized: $normalizedSender body: ${body.take(50)}")
 
-            if (!MessageDeduplicator.isNew(sender, body, timestamp)) {
+            if (!MessageDeduplicator.isNew(normalizedSender, body, timestamp)) {
                 Log.d(TAG, "Duplicate SMS — skipping")
                 continue
             }
 
             val message = Message(
-                id = MessageDeduplicator.fingerprint(sender, body, timestamp),
-                sender = sender,
+                id = MessageDeduplicator.fingerprint(normalizedSender, body, timestamp),
+                sender = normalizedSender,
                 senderName = null,
                 body = body,
                 timestamp = timestamp,
