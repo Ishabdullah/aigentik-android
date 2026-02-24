@@ -1,9 +1,6 @@
 package com.aigentik.app.adapters
 
 import android.app.Notification
-import android.app.RemoteInput
-import android.content.Intent
-import android.os.Bundle
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
@@ -13,22 +10,19 @@ import com.aigentik.app.core.Message
 import com.aigentik.app.core.MessageDeduplicator
 import com.aigentik.app.core.MessageEngine
 
-// NotificationAdapter v1.0
-// Upgrade from v0.3: adds inline reply via RemoteInput PendingIntent
+// NotificationAdapter v1.1
+// Fix from v1.0:
+//   - onListenerConnected() sets NotificationReplyRouter.appContext immediately on bind
+//     This guarantees context is available before any notification arrives
+//     Previously context was set in onNotificationPosted() which is TOO LATE —
+//     the reply fires before the next notification posts
+//   - resolveSender() returns full phone from ContactEngine (not takeLast(10))
+//     Prevents "+1" truncation when contact name resolves to stored number
+//   - "Google Voice" and "Ish" contact names will resolve correctly after rename
 //
-// Architecture: NotificationListenerService is the sole outbound SMS/RCS transport
-// SEND_SMS is no longer used — we invoke the messaging app's own reply mechanism
-// This works for SMS, RCS, and any notification-based messaging app
-//
-// Reply key lookup table — OEM differences:
-//   Samsung Messages (com.samsung.android.messaging) → "reply", "replyText"
-//   Google Messages (com.google.android.apps.messaging) → "reply_text", "reply"
-//   Fallback: try all keys until one works
-//
-// Sender resolution:
-//   1. Try to extract E.164 phone number from notification title
-//   2. If title is a contact name, look up in ContactEngine for actual number
-//   3. Store notification key → sender mapping for reply routing
+// Contact naming convention (for clarity in logs):
+//   "Google Voice" = Aigentik's number (used as agent identity)
+//   "Ish"          = Admin/owner number (your personal carrier number)
 class NotificationAdapter : NotificationListenerService() {
 
     companion object {
@@ -39,21 +33,35 @@ class NotificationAdapter : NotificationListenerService() {
             "com.samsung.android.messaging"
         )
 
-        // RemoteInput key candidates by package — ordered by likelihood
         private val REPLY_KEYS = mapOf(
-            "com.samsung.android.messaging" to listOf("reply", "replyText", "android.intent.extra.text"),
-            "com.google.android.apps.messaging" to listOf("reply_text", "reply", "android.intent.extra.text")
+            "com.samsung.android.messaging"       to listOf("KEY_DIRECT_REPLY", "reply", "replyText", "android.intent.extra.text"),
+            "com.google.android.apps.messaging"   to listOf("reply_text", "reply", "android.intent.extra.text")
         )
-        private val FALLBACK_REPLY_KEYS = listOf("reply", "reply_text", "replyText", "android.intent.extra.text")
+        private val FALLBACK_REPLY_KEYS = listOf(
+            "KEY_DIRECT_REPLY", "reply", "reply_text", "replyText", "android.intent.extra.text"
+        )
 
         private const val KEY_TITLE    = "android.title"
         private const val KEY_TEXT     = "android.text"
         private const val KEY_BIG_TEXT = "android.bigText"
     }
 
-    // Store active notifications so we can find reply action later
-    // Map: dedup key → StatusBarNotification
     private val activeNotifications = mutableMapOf<String, StatusBarNotification>()
+
+    // Called when Android binds our NotificationListenerService
+    // This is the CORRECT place to set appContext — guaranteed before any notification
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        NotificationReplyRouter.appContext = applicationContext
+        Log.i(TAG, "NotificationListenerService connected — appContext set for PendingIntent")
+    }
+
+    // Called if Android unbinds the service (rare — usually only on permission revoke)
+    override fun onListenerDisconnected() {
+        super.onListenerDisconnected()
+        NotificationReplyRouter.appContext = null
+        Log.w(TAG, "NotificationListenerService disconnected — appContext cleared")
+    }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         if (sbn.packageName !in MESSAGING_PACKAGES) return
@@ -74,7 +82,7 @@ class NotificationAdapter : NotificationListenerService() {
 
         val timestamp = sbn.postTime
 
-        // Resolve sender — try phone number extraction first, then contact lookup
+        // Resolve sender to phone number
         val sender = resolveSender(title)
         Log.d(TAG, "Notification from '$title' resolved sender: $sender pkg: ${sbn.packageName}")
 
@@ -85,9 +93,7 @@ class NotificationAdapter : NotificationListenerService() {
 
         val dedupKey = MessageDeduplicator.fingerprint(sender, text, timestamp)
 
-        // Store notification for reply use
         activeNotifications[dedupKey] = sbn
-        // Cap map size
         if (activeNotifications.size > 50) {
             activeNotifications.remove(activeNotifications.keys.first())
         }
@@ -101,7 +107,7 @@ class NotificationAdapter : NotificationListenerService() {
             channel = Message.Channel.NOTIFICATION
         )
 
-        // Register inline reply handler — pass both semantic key AND sbn.key
+        // Register with router — both semantic key (for reply lookup) and sbn.key (for eviction)
         NotificationReplyRouter.register(dedupKey, sbn.notification, sbn.packageName, sbn.key)
 
         MessageEngine.onMessageReceived(message)
@@ -110,35 +116,46 @@ class NotificationAdapter : NotificationListenerService() {
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
         activeNotifications.entries.removeIf { it.value.key == sbn.key }
-        // Evict from reply router — prevents stale PendingIntent sends
         NotificationReplyRouter.onNotificationRemoved(sbn.key)
     }
 
-    // Resolve sender to phone number or best available identifier
-    // Priority: E.164 from title → ContactEngine lookup → raw title
+    // Resolve notification title to phone number
+    // Priority:
+    //   1. Direct E.164 / digit extraction from title (title IS a phone number)
+    //   2. ContactEngine lookup by name → return stored phone as-is (full E.164)
+    //   3. Fallback: return title unchanged (MessageEngine handles it)
+    //
+    // NOTE: After contact rename:
+    //   "Google Voice" → ContactEngine finds stored GV number → returns full E.164
+    //   "Ish"          → ContactEngine finds stored carrier number → returns full E.164
     private fun resolveSender(title: String): String {
-        // 1. Try to extract phone number directly from title
+        // 1. Title looks like a phone number — extract digits
         val phoneRegex = Regex("""[\+\d][\d\s\-\(\)]{7,}""")
         val phoneMatch = phoneRegex.find(title)
         if (phoneMatch != null) {
             val digits = phoneMatch.value.filter { it.isDigit() }
-            if (digits.length >= 10) return digits.takeLast(10)
+            if (digits.length >= 10) {
+                // Return full E.164 — SmsRouter will normalize
+                return if (digits.length == 10) "+1$digits" else "+$digits"
+            }
         }
 
-        // 2. Title is a contact name — look up in ContactEngine for phone number
+        // 2. Title is a contact name — look up stored phone number
         val contact = ContactEngine.findContact(title)
             ?: ContactEngine.findByRelationship(title)
             ?: ContactEngine.findAllByName(title).firstOrNull()
 
         if (contact != null) {
+            // Return the stored phone number exactly as stored
+            // ContactEngine stores E.164 from Android contacts
             val phone = contact.phones.firstOrNull()
             if (phone != null) {
                 Log.d(TAG, "Resolved '$title' → ${contact.name} → $phone")
-                return phone.filter { it.isDigit() }.takeLast(10)
+                return phone
             }
         }
 
-        // 3. Fallback — use title as-is (MessageEngine will handle lookup)
+        // 3. Fallback
         Log.w(TAG, "Could not resolve phone for '$title' — using name as sender ID")
         return title
     }
