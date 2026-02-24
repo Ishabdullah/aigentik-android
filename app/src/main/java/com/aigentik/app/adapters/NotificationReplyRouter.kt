@@ -93,13 +93,11 @@ object NotificationReplyRouter {
 
             // Correct PendingIntent.send() overload for Android 13+ (API 33)
             // send(Context?, Int, Intent?) is the right signature here
-            val ctx = appContext
-            if (ctx != null) {
-                action.actionIntent.send(ctx, 0, replyIntent)
-            } else {
-                // Fallback — try without context (may fail on some Android versions)
-                action.actionIntent.send(0, null, null, null, null)
+            val ctx = appContext ?: run {
+                Log.e(TAG, "No context available for PendingIntent.send() — NotificationAdapter not initialized")
+                return false
             }
+            action.actionIntent.send(ctx, 0, replyIntent)
 
             Log.i(TAG, "Inline reply sent pkg=${entry.packageName} key=${remoteInput.resultKey} text=${replyText.take(60)}")
             // Clean up after successful send
