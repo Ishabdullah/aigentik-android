@@ -75,11 +75,18 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Print debug keystore SHA-1
+      # FIXED KEYSTORE — same SHA-1 every build so Google OAuth always matches
+      # Secret DEBUG_KEYSTORE_BASE64 contains base64 of aigentik-debug.keystore
+      - name: Install fixed debug keystore
         run: |
           mkdir -p ~/.android
-          keytool -genkey -v -keystore ~/.android/debug.keystore             -alias androiddebugkey -storepass android -keypass android             -keyalg RSA -keysize 2048 -validity 10000             -dname "CN=Android Debug,O=Android,C=US" 2>/dev/null || true
-          keytool -list -v             -keystore ~/.android/debug.keystore             -alias androiddebugkey             -storepass android             -keypass android 2>/dev/null | grep "SHA1:"
+          echo "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" | base64 -d > ~/.android/debug.keystore
+          echo "✅ Fixed keystore installed"
+          keytool -list -v \
+            -keystore ~/.android/debug.keystore \
+            -alias androiddebugkey \
+            -storepass android \
+            -keypass android 2>/dev/null | grep -E "SHA1:|SHA256:"
 
       - name: Build Debug APK
         run: |
