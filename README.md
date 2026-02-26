@@ -139,7 +139,6 @@ SMS interception without replacing default SMS app
 [ ] OAuth2 integration
 [ ] Android Keystore credential storage
 [ ] Multi-model hot-swap
-[ ] GPU acceleration (Adreno Vulkan)
 [ ] Scheduled messages
 [ ] Web dashboard companion
 📄 License

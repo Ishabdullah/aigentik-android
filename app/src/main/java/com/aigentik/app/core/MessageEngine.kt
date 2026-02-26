@@ -51,6 +51,22 @@ object MessageEngine {
         chatNotifier?.invoke(message)
     }
 
+    // Send reply back through the same channel the message arrived on
+    // Used for: admin auth confirmations, destructive action responses
+    private fun replyToSender(message: Message, reply: String) {
+        when (message.channel) {
+            Message.Channel.NOTIFICATION -> {
+                val sent = com.aigentik.app.adapters.NotificationReplyRouter.sendReply(
+                    message.id, reply
+                )
+                if (!sent) SmsRouter.send(message.sender, reply)
+            }
+            Message.Channel.SMS   -> SmsRouter.send(message.sender, reply)
+            Message.Channel.EMAIL -> EmailRouter.routeReply(message.sender, reply)
+            Message.Channel.CHAT  -> notify(reply)
+        }
+    }
+
     fun onMessageReceived(message: Message) {
         Log.i(TAG, "Message from ${message.sender} via ${message.channel}")
         if (AigentikSettings.isPaused) {
@@ -246,7 +262,7 @@ object MessageEngine {
                 "check_email", "read_email", "list_email" -> {
                     val running = EmailMonitor.isRunning()
                     val status = if (running) "active ✅" else "stopped ❌"
-                    val connected = if (GmailClient.isConnected()) "connected" else "disconnected"
+                    val connected = if (EmailMonitor.isRunning()) "connected" else "disconnected"
                     notify("📧 Email monitor: $status\nGmail: $connected\nNew emails appear here automatically.\nChannels:\n${ChannelManager.statusSummary()}")
                 }
 

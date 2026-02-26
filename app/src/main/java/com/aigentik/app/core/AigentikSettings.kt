@@ -3,23 +3,27 @@ package com.aigentik.app.core
 import android.content.Context
 import android.content.SharedPreferences
 
-// AigentikSettings v1.0 — persists all user configuration
-// Added: channel enable/disable states for SMS, GVOICE, EMAIL
+// AigentikSettings v1.1
+// Added: adminPasswordHash, adminUsername, isOAuthSignedIn
+// Removed: gmailAppPassword dependency (replaced by OAuth2)
 object AigentikSettings {
 
     private const val PREFS_NAME = "aigentik_settings"
 
-    private const val KEY_CONFIGURED       = "configured"
-    private const val KEY_AGENT_NAME       = "agent_name"
-    private const val KEY_OWNER_NAME       = "owner_name"
-    private const val KEY_ADMIN_NUMBER     = "admin_number"
-    private const val KEY_AIGENTIK_NUMBER  = "aigentik_number"
-    private const val KEY_GMAIL_ADDRESS    = "gmail_address"
+    private const val KEY_CONFIGURED        = "configured"
+    private const val KEY_AGENT_NAME        = "agent_name"
+    private const val KEY_OWNER_NAME        = "owner_name"
+    private const val KEY_ADMIN_NUMBER      = "admin_number"
+    private const val KEY_AIGENTIK_NUMBER   = "aigentik_number"
+    private const val KEY_GMAIL_ADDRESS     = "gmail_address"
     private const val KEY_GMAIL_APP_PASSWORD = "gmail_app_password"
-    private const val KEY_AUTO_REPLY       = "auto_reply_default"
-    private const val KEY_PAUSED           = "paused"
-    private const val KEY_MODEL_PATH       = "model_path"
-    private const val KEY_CHANNEL_PREFIX   = "channel_enabled_"
+    private const val KEY_AUTO_REPLY        = "auto_reply_default"
+    private const val KEY_PAUSED            = "paused"
+    private const val KEY_MODEL_PATH        = "model_path"
+    private const val KEY_CHANNEL_PREFIX    = "channel_enabled_"
+    private const val KEY_ADMIN_PASS_HASH   = "admin_password_hash"
+    private const val KEY_ADMIN_USERNAME    = "admin_username"
+    private const val KEY_OAUTH_SIGNED_IN   = "oauth_signed_in"
 
     private lateinit var prefs: SharedPreferences
 
@@ -52,10 +56,12 @@ object AigentikSettings {
         get() = prefs.getString(KEY_ADMIN_PASS_HASH, "") ?: ""
         set(value) = prefs.edit().putString(KEY_ADMIN_PASS_HASH, value).apply()
 
+    // Admin username — defaults to ownerName if not set
     var adminUsername: String
-        get() = prefs.getString(KEY_ADMIN_USERNAME, ownerName) ?: ownerName
+        get() = prefs.getString(KEY_ADMIN_USERNAME, "") ?: ""
         set(value) = prefs.edit().putString(KEY_ADMIN_USERNAME, value).apply()
 
+    // Whether user has completed Google OAuth2 sign-in
     var isOAuthSignedIn: Boolean
         get() = prefs.getBoolean(KEY_OAUTH_SIGNED_IN, false)
         set(value) = prefs.edit().putBoolean(KEY_OAUTH_SIGNED_IN, value).apply()
@@ -64,10 +70,12 @@ object AigentikSettings {
         get() = prefs.getString(KEY_GMAIL_ADDRESS, "") ?: ""
         set(value) = prefs.edit().putString(KEY_GMAIL_ADDRESS, value).apply()
 
+    // Kept for backward compat — will be removed once OAuth fully migrated
     var gmailAppPassword: String
         get() = prefs.getString(KEY_GMAIL_APP_PASSWORD, "") ?: ""
-        // Strip spaces on save — app passwords with spaces fail IMAP auth
-        set(value) = prefs.edit().putString(KEY_GMAIL_APP_PASSWORD, value.replace(" ", "").trim()).apply()
+        set(value) = prefs.edit().putString(
+            KEY_GMAIL_APP_PASSWORD, value.replace(" ", "").trim()
+        ).apply()
 
     var autoReplyDefault: Boolean
         get() = prefs.getBoolean(KEY_AUTO_REPLY, true)
@@ -81,7 +89,6 @@ object AigentikSettings {
         get() = prefs.getString(KEY_MODEL_PATH, "") ?: ""
         set(v) = prefs.edit().putString(KEY_MODEL_PATH, v).apply()
 
-    // Channel enable/disable persistence
     fun setChannelEnabled(channelName: String, enabled: Boolean) {
         prefs.edit().putBoolean("$KEY_CHANNEL_PREFIX$channelName", enabled).apply()
     }
@@ -113,7 +120,6 @@ object AigentikSettings {
         if (ownerName.isBlank()) errors.add("Owner name is required")
         if (adminNumber.isBlank()) errors.add("Your phone number is required")
         if (gmailAddress.isBlank()) errors.add("Gmail address is required")
-        if (gmailAppPassword.isBlank()) errors.add("Gmail app password is required")
         return errors
     }
 }
