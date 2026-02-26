@@ -2,6 +2,7 @@ package com.aigentik.app.auth
 
 import android.accounts.Account
 import android.content.Context
+import com.aigentik.app.R
 import android.util.Log
 import com.google.android.gms.auth.GoogleAuthUtil
 import com.google.android.gms.auth.api.signin.GoogleSignIn
@@ -63,8 +64,15 @@ object GoogleAuthManager {
 
     // Build GoogleSignInClient for launching sign-in intent
     fun buildSignInClient(context: Context): GoogleSignInClient {
+        val webClientId = context.getString(R.string.google_server_client_id)
         val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestIdToken(webClientId)
             .requestEmail()
+            .requestScopes(
+                com.google.android.gms.common.api.Scope("https://www.googleapis.com/auth/gmail.modify"),
+                com.google.android.gms.common.api.Scope("https://www.googleapis.com/auth/gmail.send"),
+                com.google.android.gms.common.api.Scope("https://www.googleapis.com/auth/contacts.readonly")
+            )
             .requestScopes(
                 com.google.android.gms.common.api.Scope(SCOPES[0]),
                 com.google.android.gms.common.api.Scope(SCOPES[1]),
