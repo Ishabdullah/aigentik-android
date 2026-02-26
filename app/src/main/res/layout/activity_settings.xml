@@ -3,7 +3,7 @@
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#0A0A0A">
+    android:background="#080C14">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -16,111 +16,174 @@
             android:layout_height="wrap_content"
             android:text="⚙️ Settings"
             android:textSize="22sp"
-            android:textColor="#00FF88"
+            android:textColor="#00D4FF"
             android:layout_marginBottom="24dp"/>
 
+        <!-- Agent Name -->
         <TextView android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="AI Assistant Name"
-            android:textColor="#CCCCCC"
+            android:textColor="#7BA7CC"
             android:textSize="13sp"
             android:layout_marginBottom="4dp"/>
         <EditText android:id="@+id/etAgentName"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:textColor="#FFFFFF"
-            android:textColorHint="#555555"
+            android:textColorHint="#334455"
             android:background="@drawable/input_background"
             android:padding="12dp"
             android:layout_marginBottom="16dp"
             android:inputType="text"/>
 
+        <!-- Owner Name -->
         <TextView android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Your Name"
-            android:textColor="#CCCCCC"
+            android:textColor="#7BA7CC"
             android:textSize="13sp"
             android:layout_marginBottom="4dp"/>
         <EditText android:id="@+id/etOwnerName"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:textColor="#FFFFFF"
-            android:textColorHint="#555555"
+            android:textColorHint="#334455"
             android:background="@drawable/input_background"
             android:padding="12dp"
             android:layout_marginBottom="16dp"
             android:inputType="text"/>
 
+        <!-- Admin Phone -->
         <TextView android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Your Phone Number (Admin)"
-            android:textColor="#CCCCCC"
+            android:textColor="#7BA7CC"
             android:textSize="13sp"
             android:layout_marginBottom="4dp"/>
         <EditText android:id="@+id/etAdminNumber"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:textColor="#FFFFFF"
-            android:textColorHint="#555555"
+            android:textColorHint="#334455"
             android:background="@drawable/input_background"
             android:padding="12dp"
             android:layout_marginBottom="16dp"
             android:inputType="phone"/>
 
+        <!-- GVoice Number -->
         <TextView android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Aigentik Google Voice Number"
-            android:textColor="#CCCCCC"
+            android:textColor="#7BA7CC"
             android:textSize="13sp"
             android:layout_marginBottom="4dp"/>
         <EditText android:id="@+id/etAigentikNumber"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:textColor="#FFFFFF"
-            android:textColorHint="#555555"
+            android:textColorHint="#334455"
             android:background="@drawable/input_background"
             android:padding="12dp"
-            android:layout_marginBottom="16dp"
+            android:layout_marginBottom="24dp"
             android:inputType="phone"/>
 
-        <TextView android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Gmail Address"
-            android:textColor="#CCCCCC"
-            android:textSize="13sp"
-            android:layout_marginBottom="4dp"/>
-        <EditText android:id="@+id/etGmailAddress"
+        <!-- Google Account Section -->
+        <View
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textColor="#FFFFFF"
-            android:textColorHint="#555555"
-            android:background="@drawable/input_background"
-            android:padding="12dp"
-            android:layout_marginBottom="16dp"
-            android:inputType="textEmailAddress"/>
+            android:layout_height="1dp"
+            android:background="#1A2A3A"
+            android:layout_marginBottom="20dp"/>
 
-        <TextView android:layout_width="wrap_content"
+        <TextView
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Gmail App Password"
-            android:textColor="#CCCCCC"
+            android:text="Google Account"
+            android:textColor="#00D4FF"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp"/>
+
+        <!-- Signed in status -->
+        <TextView android:id="@+id/tvGoogleAccountStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Not signed in"
+            android:textColor="#7BA7CC"
             android:textSize="13sp"
+            android:layout_marginBottom="12dp"/>
+
+        <!-- Sign in with Google button -->
+        <Button android:id="@+id/btnGoogleSignIn"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:text="Sign in with Google"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#1A73E8"
+            android:layout_marginBottom="8dp"/>
+
+        <!-- Sign out button (hidden until signed in) -->
+        <Button android:id="@+id/btnGoogleSignOut"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:text="Sign Out"
+            android:textColor="#FF6B6B"
+            android:backgroundTint="#1A0A0A"
+            android:visibility="gone"
+            android:layout_marginBottom="24dp"/>
+
+        <!-- Admin Password Section -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#1A2A3A"
+            android:layout_marginBottom="20dp"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Remote Admin Password"
+            android:textColor="#00D4FF"
+            android:textSize="15sp"
+            android:textStyle="bold"
             android:layout_marginBottom="4dp"/>
-        <EditText android:id="@+id/etAppPassword"
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Used to authenticate commands sent via SMS or Google Voice"
+            android:textColor="#7BA7CC"
+            android:textSize="12sp"
+            android:layout_marginBottom="8dp"/>
+
+        <EditText android:id="@+id/etAdminPassword"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:textColor="#FFFFFF"
-            android:textColorHint="#555555"
+            android:textColorHint="#334455"
+            android:hint="Set admin password"
             android:background="@drawable/input_background"
             android:padding="12dp"
-            android:layout_marginBottom="32dp"
+            android:layout_marginBottom="8dp"
             android:inputType="textPassword"/>
 
+        <EditText android:id="@+id/etAdminPasswordConfirm"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#334455"
+            android:hint="Confirm admin password"
+            android:background="@drawable/input_background"
+            android:padding="12dp"
+            android:layout_marginBottom="24dp"
+            android:inputType="textPassword"/>
+
+        <!-- Save -->
         <Button android:id="@+id/btnSave"
             android:layout_width="match_parent"
             android:layout_height="52dp"
             android:text="Save Settings"
             android:textColor="#000000"
-            android:backgroundTint="#00FF88"
+            android:backgroundTint="#00D4FF"
             android:layout_marginBottom="8dp"/>
 
         <TextView android:id="@+id/tvSaveStatus"
@@ -131,12 +194,13 @@
             android:layout_gravity="center"
             android:layout_marginBottom="16dp"/>
 
+        <!-- Other actions -->
         <Button android:id="@+id/btnManageModel"
             android:layout_width="match_parent"
             android:layout_height="48dp"
             android:text="🧠 Manage AI Model"
             android:textColor="#FFFFFF"
-            android:backgroundTint="#222222"
+            android:backgroundTint="#0F1824"
             android:layout_marginBottom="8dp"/>
 
         <Button android:id="@+id/btnResetSetup"

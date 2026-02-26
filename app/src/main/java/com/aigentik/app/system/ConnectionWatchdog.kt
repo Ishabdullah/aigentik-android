@@ -1,8 +1,8 @@
 package com.aigentik.app.system
 
+import android.content.Context
 import android.util.Log
-import com.aigentik.app.email.EmailMonitor
-import com.aigentik.app.email.GmailClient
+import com.aigentik.app.auth.GoogleAuthManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -10,65 +10,46 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-// ConnectionWatchdog v0.9 — monitors Gmail connection health
-// Automatically reconnects if connection drops
-// Runs every 5 minutes
+// ConnectionWatchdog v2.0
+// REMOVED: GmailClient IMAP reconnect logic — no longer needed
+// EmailMonitor v2 is notification-driven, no persistent connection to watch
+//
+// Now watches:
+//   - OAuth2 token validity (Google Sign-In session)
+//   - Logs warning if token lost so user knows to re-authenticate
+//
+// Runs every 30 minutes — very low overhead
 object ConnectionWatchdog {
 
     private const val TAG = "ConnectionWatchdog"
-    private const val CHECK_INTERVAL_MS = 5 * 60 * 1000L
+    private const val CHECK_INTERVAL_MS = 30 * 60 * 1000L
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var isRunning = false
+    private var appContext: Context? = null
 
-    // Track consecutive failures for backoff
-    private var failureCount = 0
-    private const val MAX_FAILURES = 5
-
-    fun start() {
+    fun start(context: Context) {
+        appContext = context.applicationContext
         if (isRunning) return
         isRunning = true
-        Log.i(TAG, "ConnectionWatchdog started")
-
+        Log.i(TAG, "ConnectionWatchdog started — OAuth2 session monitor")
         scope.launch {
             while (isActive && isRunning) {
                 delay(CHECK_INTERVAL_MS)
-                checkAndReconnect()
+                checkOAuthSession()
             }
         }
     }
 
-    private suspend fun checkAndReconnect() {
-        try {
-            if (!GmailClient.isConnected()) {
-                failureCount++
-                Log.w(TAG, "Gmail disconnected — attempting reconnect (attempt $failureCount)")
-
-                if (failureCount > MAX_FAILURES) {
-                    // Exponential backoff — wait longer after repeated failures
-                    val backoffMs = minOf(failureCount * 60_000L, 30 * 60_000L)
-                    Log.w(TAG, "Too many failures — backing off ${backoffMs/1000}s")
-                    delay(backoffMs)
-                }
-
-                val reconnected = GmailClient.connect()
-                if (reconnected) {
-                    failureCount = 0
-                    Log.i(TAG, "Gmail reconnected successfully")
-                    // Restart email monitor
-                    EmailMonitor.stop()
-                    EmailMonitor.start()
-                } else {
-                    Log.e(TAG, "Gmail reconnect failed")
-                }
-            } else {
-                // Connection healthy
-                if (failureCount > 0) {
-                    Log.i(TAG, "Connection restored after $failureCount failures")
-                    failureCount = 0
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Watchdog check failed: ${e.message}")
+    private fun checkOAuthSession() {
+        val ctx = appContext ?: return
+        val signedIn = GoogleAuthManager.isSignedIn(ctx)
+        if (!signedIn) {
+            // NOTE: Token expired or user signed out
+            // User needs to re-authenticate in Settings
+            // We log but do NOT auto-retry — that would require storing password
+            Log.w(TAG, "⚠️ Google OAuth session lost — user must re-sign-in in Settings")
+        } else {
+            Log.d(TAG, "OAuth session healthy")
         }
     }
 

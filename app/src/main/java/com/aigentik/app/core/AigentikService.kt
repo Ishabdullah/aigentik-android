@@ -13,7 +13,6 @@ import com.aigentik.app.R
 import com.aigentik.app.ai.AiEngine
 import com.aigentik.app.email.EmailMonitor
 import com.aigentik.app.email.EmailRouter
-import com.aigentik.app.email.GmailClient
 import com.aigentik.app.sms.SmsRouter
 import com.aigentik.app.system.ConnectionWatchdog
 import kotlinx.coroutines.CoroutineScope
@@ -85,7 +84,11 @@ class AigentikService : Service() {
                 }
 
                 // Gmail
-                GmailClient.configure(gmail, password)
+                // OAuth2 — no app password needed
+                // EmailMonitor is notification-driven, no start() needed
+                EmailMonitor.init(this)
+                EmailRouter.init(this)
+                Log.i(TAG, "Email services initialized — waiting for Gmail notifications")
 
                 // MessageEngine — no replySender arg now (routing is internal)
                 MessageEngine.configure(
@@ -103,8 +106,7 @@ class AigentikService : Service() {
                     ChatBridge.post(message)
                 }
 
-                EmailMonitor.start()
-                ConnectionWatchdog.start()
+                ConnectionWatchdog.start(this)
 
                 val modelStatus = if (AiEngine.isReady()) "AI ready" else "AI fallback"
                 updateNotification(

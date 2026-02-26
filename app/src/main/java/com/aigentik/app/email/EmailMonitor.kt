@@ -1,131 +1,153 @@
 package com.aigentik.app.email
 
+import android.content.Context
 import android.util.Log
+import com.aigentik.app.auth.GoogleAuthManager
 import com.aigentik.app.core.ChannelManager
 import com.aigentik.app.core.MessageEngine
+import com.aigentik.app.email.GmailApiClient
+import com.aigentik.app.email.GoogleVoiceMessage
+import com.aigentik.app.email.ParsedEmail
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-// EmailMonitor v1.0
-// Upgrade from v0.6: IMAP IDLE instead of polling
-// Flow:
-//   1. Connect to Gmail IMAP
-//   2. Open INBOX in IDLE mode — server pushes new mail events
-//   3. On event: poll unseen, process, re-enter IDLE
-//   4. On connection drop: reconnect with backoff
-//   5. Respects ChannelManager — checks GVOICE and EMAIL channel states
+// EmailMonitor v2.0 — Gmail notification trigger architecture
+// REMOVED: IMAP IDLE, JavaMail, polling loops, ConnectionWatchdog dependency
 //
-// NOTE: IDLE requires IMAPFolder from JavaMail/Jakarta Mail
-//   If com.sun.mail.imap.IMAPFolder is not available, falls back to 30s poll
-//   Both GVoice SMS and regular emails are handled here
+// Flow:
+//   1. Gmail app receives email → posts notification on phone
+//   2. NotificationAdapter sees Gmail notification package
+//   3. Calls EmailMonitor.onGmailNotification(context)
+//   4. We call GmailApiClient.listUnread() via OAuth2 token
+//   5. Process each unread email — GVoice texts or regular email
+//   6. Mark processed emails as read
+//   7. Done — no persistent connection, no battery drain
+//
+// Privacy: all data stays on device, Gmail API ↔ phone only
 object EmailMonitor {
 
     private const val TAG = "EmailMonitor"
-    private const val RECONNECT_DELAY_MS = 10_000L
-    private const val FALLBACK_POLL_MS   = 30_000L
-
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    @Volatile private var isRunning = false
-    fun isRunning() = isRunning
 
-    fun start() {
-        if (isRunning) return
-        isRunning = true
-        Log.i(TAG, "EmailMonitor starting with IMAP IDLE")
-        scope.launch { runIdleLoop() }
+    // Track last processed Gmail historyId to avoid reprocessing
+    // Reset on app restart — safe because we mark emails read after processing
+    private var lastHistoryId: String? = null
+
+    @Volatile private var isProcessing = false
+    private var appContext: Context? = null
+
+    // Called once by AigentikService.onCreate()
+    fun init(context: Context) {
+        appContext = context.applicationContext
+        Log.i(TAG, "EmailMonitor initialized — waiting for Gmail notifications")
     }
 
-    private suspend fun runIdleLoop() {
-        var backoff = RECONNECT_DELAY_MS
+    // Called by NotificationAdapter when Gmail notification is detected
+    // This is the ONLY entry point — no polling, no IDLE
+    fun onGmailNotification(context: Context) {
+        if (!GoogleAuthManager.isSignedIn(context)) {
+            Log.w(TAG, "Gmail notification received but not signed in — ignoring")
+            return
+        }
+        if (isProcessing) {
+            Log.d(TAG, "Already processing — skipping duplicate trigger")
+            return
+        }
+        Log.i(TAG, "Gmail notification trigger — fetching unread emails")
+        scope.launch { processUnread(context) }
+    }
 
-        while (isRunning) {
-            try {
-                // Connect
-                val connected = GmailClient.connect()
-                if (!connected) {
-                    Log.w(TAG, "Connection failed — retry in ${backoff}ms")
-                    delay(backoff)
-                    backoff = minOf(backoff * 2, 300_000L) // cap at 5 min
-                    continue
+    private suspend fun processUnread(context: Context) {
+        isProcessing = true
+        try {
+            val emails = GmailApiClient.listUnread(context, maxResults = 10)
+            if (emails.isEmpty()) {
+                Log.d(TAG, "No unread emails found")
+                return
+            }
+            Log.i(TAG, "Processing ${emails.size} unread email(s)")
+
+            for (email in emails) {
+                try {
+                    processEmail(context, email)
+                    // Mark as read after successful processing
+                    GmailApiClient.markAsRead(context, email.gmailId)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to process email ${email.gmailId}: ${e.message}")
                 }
-                backoff = RECONNECT_DELAY_MS // reset on success
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "processUnread failed: ${e.message}")
+        } finally {
+            isProcessing = false
+        }
+    }
 
-                // Process any emails that arrived while we were disconnected
-                processUnseen()
+    private suspend fun processEmail(context: Context, email: ParsedEmail) {
+        Log.i(TAG, "Email from ${email.fromEmail}: ${email.subject.take(60)}")
 
-                // Open IDLE folder
-                val folder = GmailClient.openIdleFolder()
-                if (folder == null) {
-                    Log.w(TAG, "IDLE folder open failed — falling back to poll")
-                    delay(FALLBACK_POLL_MS)
-                    processUnseen()
-                    continue
+        when {
+            GmailApiClient.isGoogleVoiceText(email.subject) -> {
+                if (!ChannelManager.isEnabled(ChannelManager.Channel.GVOICE)) {
+                    Log.i(TAG, "GVoice channel disabled — skipping")
+                    return
                 }
-
-                // IDLE loop — re-enter after each notification
-                while (isRunning && folder.isOpen) {
-                    Log.d(TAG, "Entering IDLE...")
-                    val newMail = GmailClient.waitForNewMail(folder)
-                    if (newMail) {
-                        Log.i(TAG, "IDLE notification — processing unseen")
-                        processUnseen()
-                    }
+                val gvm = GmailApiClient.parseGoogleVoiceEmail(email)
+                if (gvm != null) {
+                    Log.i(TAG, "GVoice SMS from ${gvm.senderName} (${gvm.senderPhone})")
+                    val msg = buildGVoiceMessage(gvm)
+                    // Store context so EmailRouter can reply to correct thread
+                    EmailRouter.storeGVoiceContext(msg.id, gvm)
+                    MessageEngine.onMessageReceived(msg)
+                } else {
+                    Log.w(TAG, "Failed to parse GVoice email: ${email.subject}")
                 }
-
-            } catch (e: Exception) {
-                Log.e(TAG, "IDLE loop error: ${e.message} — reconnecting in ${backoff}ms")
-                delay(backoff)
-                backoff = minOf(backoff * 2, 300_000L)
+            }
+            else -> {
+                if (!ChannelManager.isEnabled(ChannelManager.Channel.EMAIL)) {
+                    Log.i(TAG, "Email channel disabled — skipping")
+                    return
+                }
+                Log.i(TAG, "Regular email from ${email.fromEmail}")
+                val msg = buildEmailMessage(email)
+                EmailRouter.storeEmailContext(msg.id, email)
+                MessageEngine.onMessageReceived(msg)
             }
         }
     }
 
-    private suspend fun processUnseen() {
-        GmailClient.pollUnseen { email ->
-            Log.i(TAG, "Email from ${email.fromEmail}: ${email.subject.take(50)}")
-
-            when {
-                GmailClient.isGoogleVoiceText(email.subject) -> {
-                    // Google Voice SMS forwarded as email
-                    if (!ChannelManager.isEnabled(ChannelManager.Channel.GVOICE)) {
-                        Log.i(TAG, "GVoice channel disabled — skipping")
-                        return@pollUnseen
-                    }
-                    val gvm = GmailClient.parseGoogleVoiceEmail(email)
-                    if (gvm != null) {
-                        val msg = GmailClient.toMessage(gvm)
-                        if (msg != null) {
-                            Log.i(TAG, "GVoice from ${gvm.senderName} (${gvm.senderPhone})")
-                            EmailRouter.storeGVoiceContext(msg.id, gvm)
-                            MessageEngine.onMessageReceived(msg)
-                        }
-                    }
-                }
-                else -> {
-                    // Regular email
-                    if (!ChannelManager.isEnabled(ChannelManager.Channel.EMAIL)) {
-                        Log.i(TAG, "Email channel disabled — skipping")
-                        return@pollUnseen
-                    }
-                    val msg = GmailClient.regularEmailToMessage(email)
-                    if (msg != null) {
-                        Log.i(TAG, "Regular email from ${email.fromEmail}")
-                        // Store email context so we can reply properly
-                        EmailRouter.storeEmailContext(msg.id, email)
-                        MessageEngine.onMessageReceived(msg)
-                    }
-                }
-            }
-        }
+    // Build a Message from a Google Voice email
+    private fun buildGVoiceMessage(gvm: GoogleVoiceMessage): com.aigentik.app.core.Message {
+        return com.aigentik.app.core.Message(
+            id          = "gvoice_${gvm.senderPhone}_${System.currentTimeMillis()}",
+            sender      = gvm.senderPhone,
+            senderName  = gvm.senderName,
+            body        = gvm.body,
+            timestamp   = System.currentTimeMillis(),
+            channel     = com.aigentik.app.core.Message.Channel.EMAIL,
+            threadId    = gvm.originalEmail.threadId
+        )
     }
 
-    fun stop() {
-        isRunning = false
-        GmailClient.disconnect()
-        Log.i(TAG, "EmailMonitor stopped")
+    // Build a Message from a regular email
+    private fun buildEmailMessage(email: ParsedEmail): com.aigentik.app.core.Message {
+        return com.aigentik.app.core.Message(
+            id          = "email_${email.fromEmail}_${System.currentTimeMillis()}",
+            sender      = email.fromEmail,
+            senderName  = email.fromName.ifBlank { null },
+            body        = email.body,
+            timestamp   = System.currentTimeMillis(),
+            channel     = com.aigentik.app.core.Message.Channel.EMAIL,
+            threadId    = email.threadId
+        )
     }
+
+    // Legacy compat — called by ConnectionWatchdog stub and old code
+    fun isRunning(): Boolean = !isProcessing
+
+    // No-op stubs for backward compat with old call sites
+    fun start() { Log.i(TAG, "EmailMonitor v2 — notification-driven, no start needed") }
+    fun stop()  { Log.i(TAG, "EmailMonitor v2 — no persistent connection to stop") }
 }

@@ -26,7 +26,8 @@ class NotificationAdapter : NotificationListenerService() {
 
         private val MESSAGING_PACKAGES = setOf(
             "com.google.android.apps.messaging",
-            "com.samsung.android.messaging"
+            "com.samsung.android.messaging",
+        "com.google.android.gm"
         )
 
         private const val KEY_TITLE    = "android.title"
