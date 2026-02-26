@@ -98,11 +98,8 @@ dependencies {
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
 
-    // Google OAuth2 + API clients
+    // Google OAuth2 Sign-In + REST API via OkHttp
     implementation(libs.google.auth)
-    implementation(libs.google.api.client.android)
-    implementation(libs.google.api.gmail)
-    implementation(libs.google.api.people)
     implementation(libs.credentials)
     implementation(libs.credentials.play.services)
     implementation(libs.google.id)

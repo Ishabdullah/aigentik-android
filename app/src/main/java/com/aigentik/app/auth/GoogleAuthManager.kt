@@ -8,8 +8,6 @@ import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
-import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
-import com.google.api.client.util.ExponentialBackOff
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -42,7 +40,6 @@ object GoogleAuthManager {
         "https://www.googleapis.com/auth/calendar.readonly"
     )
 
-    private var credential: GoogleAccountCredential? = null
     private var signedInAccount: GoogleSignInAccount? = null
 
     // Initialize from stored account on app start
@@ -50,7 +47,7 @@ object GoogleAuthManager {
     fun initFromStoredAccount(context: Context): Boolean {
         val account = GoogleSignIn.getLastSignedInAccount(context)
         if (account != null) {
-            setupCredential(context, account)
+            signedInAccount = account
             Log.i(TAG, "Restored Google account: ${account.email}")
             return true
         }
@@ -61,23 +58,7 @@ object GoogleAuthManager {
     // Called after successful sign-in in SettingsActivity
     fun onSignInSuccess(context: Context, account: GoogleSignInAccount) {
         signedInAccount = account
-        setupCredential(context, account)
         Log.i(TAG, "Signed in as: ${account.email}")
-    }
-
-    private fun setupCredential(context: Context, account: GoogleSignInAccount) {
-        signedInAccount = account
-        credential = GoogleAccountCredential
-            .usingOAuth2(context.applicationContext, SCOPES)
-            .setBackOff(ExponentialBackOff())
-            .also { cred ->
-                account.account?.let { cred.selectedAccount = it }
-                    ?: run {
-                        // Fallback: find account by email
-                        val androidAccount = Account(account.email, "com.google")
-                        cred.selectedAccount = androidAccount
-                    }
-            }
     }
 
     // Build GoogleSignInClient for launching sign-in intent
@@ -115,9 +96,6 @@ object GoogleAuthManager {
             null
         }
     }
-
-    // Get credential for Google API client calls
-    fun getCredential(): GoogleAccountCredential? = credential
 
     fun isSignedIn(context: Context): Boolean =
         GoogleSignIn.getLastSignedInAccount(context) != null

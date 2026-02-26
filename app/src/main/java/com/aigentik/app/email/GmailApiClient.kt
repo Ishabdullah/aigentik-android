@@ -4,127 +4,139 @@ import android.content.Context
 import android.util.Base64
 import android.util.Log
 import com.aigentik.app.auth.GoogleAuthManager
-import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
-import com.google.api.client.http.javanet.NetHttpTransport
-import com.google.api.client.json.gson.GsonFactory
-import com.google.api.services.gmail.Gmail
-import com.google.api.services.gmail.model.Message
+import com.google.gson.Gson
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.Properties
+import java.util.concurrent.TimeUnit
 import javax.mail.Session
 import javax.mail.internet.InternetAddress
 import javax.mail.internet.MimeMessage
 
-// GmailApiClient v1.0
-// Full Gmail REST API client via OAuth2 — replaces JavaMail IMAP/SMTP
-// All operations use OAuth2 token, no app password needed
+// GmailApiClient v1.1 — Gmail REST API via OkHttp
+// Uses OAuth2 Bearer token from GoogleAuthManager
+// No google-api-services-gmail dependency needed — direct REST calls
 //
-// Capabilities:
-//   - listUnread() — get unread emails
-//   - sendEmail() — send via Gmail API
-//   - deleteEmail() — trash a message
-//   - markAsRead() — mark message read
-//   - markAsSpam() — move to spam
-//   - applyLabel() — add label
-//   - searchEmails() — search by query
-//   - getEmailBody() — get full email content
-//   - replyToEmail() — reply preserving thread
+// API base: https://gmail.googleapis.com/gmail/v1/users/me/
+// Auth: Authorization: Bearer <token>
 //
-// NOTE: Google Voice texts arrive as emails from txt.voice.google.com
-//   Subject: "New text message from Name (XXX) XXX-XXXX"
-//   We detect and route these separately via isGoogleVoiceText()
+// Supports:
+//   listUnread, getFullEmail, sendEmail, replyToEmail,
+//   deleteEmail, markAsRead, markAsSpam, searchEmails,
+//   deleteAllMatching, replyToGoogleVoiceText
 object GmailApiClient {
 
     private const val TAG = "GmailApiClient"
-    private const val USER = "me"
-    private const val APP_NAME = "Aigentik"
-
-    // GV subject prefix for detection
+    private const val BASE = "https://gmail.googleapis.com/gmail/v1/users/me"
     private const val GV_SUBJECT_PREFIX = "New text message from"
 
-    private fun buildService(credential: GoogleAccountCredential): Gmail =
-        Gmail.Builder(
-            NetHttpTransport(),
-            GsonFactory.getDefaultInstance(),
-            credential
-        ).setApplicationName(APP_NAME).build()
+    private val http = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .build()
+    private val gson = Gson()
 
-    // Get Gmail service — returns null if not authenticated
-    private fun getService(context: Context): Gmail? {
-        val credential = GoogleAuthManager.getCredential()
-        if (credential == null) {
-            Log.e(TAG, "No credential — user not signed in")
-            return null
-        }
-        return buildService(credential)
-    }
+    // --- Core HTTP helpers ---
 
-    // List unread emails — returns list of ParsedEmail
-    suspend fun listUnread(context: Context, maxResults: Long = 20): List<ParsedEmail> =
+    private suspend fun get(context: Context, url: String): JsonObject? =
         withContext(Dispatchers.IO) {
+            val token = GoogleAuthManager.getFreshToken(context) ?: return@withContext null
+            val req = Request.Builder()
+                .url(url)
+                .header("Authorization", "Bearer $token")
+                .build()
             try {
-                val service = getService(context) ?: return@withContext emptyList()
-                val result = service.users().messages()
-                    .list(USER)
-                    .setQ("is:unread in:inbox")
-                    .setMaxResults(maxResults)
-                    .execute()
-
-                val messages = result.messages ?: return@withContext emptyList()
-                messages.mapNotNull { msg ->
-                    try {
-                        getFullEmail(context, msg.id)
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Failed to fetch message ${msg.id}: ${e.message}")
-                        null
-                    }
+                val resp = http.newCall(req).execute()
+                if (!resp.isSuccessful) {
+                    Log.e(TAG, "GET $url → ${resp.code}: ${resp.body?.string()?.take(200)}")
+                    return@withContext null
                 }
+                JsonParser.parseString(resp.body?.string()).asJsonObject
             } catch (e: Exception) {
-                Log.e(TAG, "listUnread failed: ${e.message}")
-                emptyList()
-            }
-        }
-
-    // Get full email content by ID
-    suspend fun getFullEmail(context: Context, messageId: String): ParsedEmail? =
-        withContext(Dispatchers.IO) {
-            try {
-                val service = getService(context) ?: return@withContext null
-                val msg = service.users().messages()
-                    .get(USER, messageId)
-                    .setFormat("full")
-                    .execute()
-
-                val headers = msg.payload?.headers ?: return@withContext null
-                val subject = headers.firstOrNull { it.name == "Subject" }?.value ?: ""
-                val from = headers.firstOrNull { it.name == "From" }?.value ?: ""
-                val to = headers.firstOrNull { it.name == "To" }?.value ?: ""
-                val date = headers.firstOrNull { it.name == "Date" }?.value ?: ""
-                val messageIdHeader = headers.firstOrNull { it.name == "Message-ID" }?.value ?: messageId
-                val threadId = msg.threadId ?: ""
-
-                val body = extractBody(msg.payload)
-
-                ParsedEmail(
-                    messageId = messageIdHeader,
-                    gmailId = messageId,
-                    threadId = threadId,
-                    fromEmail = parseEmail(from),
-                    fromName = parseName(from),
-                    toEmail = to,
-                    subject = subject,
-                    body = body,
-                    date = date,
-                    isUnread = msg.labelIds?.contains("UNREAD") == true
-                )
-            } catch (e: Exception) {
-                Log.e(TAG, "getFullEmail failed for $messageId: ${e.message}")
+                Log.e(TAG, "GET failed: ${e.message}")
                 null
             }
         }
 
-    // Send email via Gmail API
+    private suspend fun post(context: Context, url: String, body: String): JsonObject? =
+        withContext(Dispatchers.IO) {
+            val token = GoogleAuthManager.getFreshToken(context) ?: return@withContext null
+            val req = Request.Builder()
+                .url(url)
+                .header("Authorization", "Bearer $token")
+                .post(body.toRequestBody("application/json".toMediaType()))
+                .build()
+            try {
+                val resp = http.newCall(req).execute()
+                if (!resp.isSuccessful) {
+                    Log.e(TAG, "POST $url → ${resp.code}: ${resp.body?.string()?.take(200)}")
+                    return@withContext null
+                }
+                JsonParser.parseString(resp.body?.string()).asJsonObject
+            } catch (e: Exception) {
+                Log.e(TAG, "POST failed: ${e.message}")
+                null
+            }
+        }
+
+    // --- Public API ---
+
+    // List unread emails
+    suspend fun listUnread(context: Context, maxResults: Int = 20): List<ParsedEmail> =
+        withContext(Dispatchers.IO) {
+            val url = "$BASE/messages?q=is:unread+in:inbox&maxResults=$maxResults"
+            val result = get(context, url) ?: return@withContext emptyList()
+            val messages = result.getAsJsonArray("messages") ?: return@withContext emptyList()
+            messages.mapNotNull { el ->
+                val id = el.asJsonObject.get("id")?.asString ?: return@mapNotNull null
+                try { getFullEmail(context, id) } catch (e: Exception) { null }
+            }
+        }
+
+    // Get full email by Gmail message ID
+    suspend fun getFullEmail(context: Context, messageId: String): ParsedEmail? =
+        withContext(Dispatchers.IO) {
+            val url = "$BASE/messages/$messageId?format=full"
+            val msg = get(context, url) ?: return@withContext null
+
+            val headers = msg.getAsJsonObject("payload")
+                ?.getAsJsonArray("headers") ?: return@withContext null
+
+            fun header(name: String) = headers.firstOrNull {
+                it.asJsonObject.get("name")?.asString?.equals(name, true) == true
+            }?.asJsonObject?.get("value")?.asString ?: ""
+
+            val subject  = header("Subject")
+            val from     = header("From")
+            val to       = header("To")
+            val date     = header("Date")
+            val msgId    = header("Message-ID").ifBlank { messageId }
+            val threadId = msg.get("threadId")?.asString ?: ""
+            val labels   = msg.getAsJsonArray("labelIds")
+            val isUnread = labels?.any { it.asString == "UNREAD" } == true
+            val body     = extractBody(msg.getAsJsonObject("payload"))
+
+            ParsedEmail(
+                messageId  = msgId,
+                gmailId    = messageId,
+                threadId   = threadId,
+                fromEmail  = parseEmail(from),
+                fromName   = parseName(from),
+                toEmail    = to,
+                subject    = subject,
+                body       = body,
+                date       = date,
+                isUnread   = isUnread
+            )
+        }
+
+    // Send email
     suspend fun sendEmail(
         context: Context,
         to: String,
@@ -134,193 +146,170 @@ object GmailApiClient {
         inReplyTo: String? = null
     ): Boolean = withContext(Dispatchers.IO) {
         try {
-            val service = getService(context) ?: return@withContext false
-            val fromEmail = GoogleAuthManager.getSignedInEmail(context) ?: return@withContext false
+            val fromEmail = GoogleAuthManager.getSignedInEmail(context)
+                ?: return@withContext false
 
-            // Build MIME message
             val props = Properties()
             val session = Session.getDefaultInstance(props, null)
-            val mimeMessage = MimeMessage(session).apply {
+            val mime = MimeMessage(session).apply {
                 setFrom(InternetAddress(fromEmail))
-                addRecipient(javax.mail.Message.RecipientType.TO, InternetAddress(to))
+                addRecipient(
+                    javax.mail.Message.RecipientType.TO,
+                    InternetAddress(to)
+                )
                 this.subject = subject
                 setText(body)
-                inReplyTo?.let { setHeader("In-Reply-To", it) }
-                inReplyTo?.let { setHeader("References", it) }
+                inReplyTo?.let {
+                    setHeader("In-Reply-To", it)
+                    setHeader("References", it)
+                }
             }
 
-            // Encode to base64
             val baos = java.io.ByteArrayOutputStream()
-            mimeMessage.writeTo(baos)
-            val encoded = Base64.encodeToString(baos.toByteArray(), Base64.URL_SAFE or Base64.NO_WRAP)
+            mime.writeTo(baos)
+            val encoded = Base64.encodeToString(
+                baos.toByteArray(), Base64.URL_SAFE or Base64.NO_WRAP
+            )
 
-            val message = Message().apply {
-                raw = encoded
-                threadId?.let { this.threadId = it }
+            val jsonBody = buildString {
+                append("{\"raw\":\"$encoded\"")
+                if (threadId != null) append(",\"threadId\":\"$threadId\"")
+                append("}")
             }
 
-            service.users().messages().send(USER, message).execute()
-            Log.i(TAG, "Email sent to $to subject='$subject'")
-            true
+            val result = post(context, "$BASE/messages/send", jsonBody)
+            val success = result != null
+            if (success) Log.i(TAG, "Email sent to $to")
+            else Log.e(TAG, "sendEmail failed — null response")
+            success
         } catch (e: Exception) {
-            Log.e(TAG, "sendEmail failed: ${e.message}")
+            Log.e(TAG, "sendEmail exception: ${e.message}")
             false
         }
     }
 
-    // Reply to an existing email preserving thread
+    // Reply to email preserving thread
     suspend fun replyToEmail(context: Context, original: ParsedEmail, replyBody: String): Boolean =
         sendEmail(
-            context = context,
-            to = original.fromEmail,
-            subject = if (original.subject.startsWith("Re:")) original.subject
-                      else "Re: ${original.subject}",
-            body = replyBody,
-            threadId = original.threadId,
+            context   = context,
+            to        = original.fromEmail,
+            subject   = if (original.subject.startsWith("Re:")) original.subject
+                        else "Re: ${original.subject}",
+            body      = replyBody,
+            threadId  = original.threadId,
             inReplyTo = original.messageId
         )
 
-    // Reply to Google Voice text (arrives as email from txt.voice.google.com)
+    // Reply to Google Voice text email
     suspend fun replyToGoogleVoiceText(
         context: Context,
         original: ParsedEmail,
         replyText: String
-    ): Boolean = withContext(Dispatchers.IO) {
-        // GVoice reply: send back to the same thread
-        // GVoice routes it as a text to the original sender
-        replyToEmail(context, original, replyText)
-    }
+    ): Boolean = replyToEmail(context, original, replyText)
 
-    // Delete (trash) email by Gmail ID
+    // Trash a message
     suspend fun deleteEmail(context: Context, gmailId: String): Boolean =
         withContext(Dispatchers.IO) {
-            try {
-                val service = getService(context) ?: return@withContext false
-                service.users().messages().trash(USER, gmailId).execute()
-                Log.i(TAG, "Email trashed: $gmailId")
-                true
-            } catch (e: Exception) {
-                Log.e(TAG, "deleteEmail failed: ${e.message}")
-                false
-            }
+            val result = post(context, "$BASE/messages/$gmailId/trash", "{}")
+            result != null
         }
 
-    // Mark email as read
+    // Mark as read
     suspend fun markAsRead(context: Context, gmailId: String): Boolean =
         withContext(Dispatchers.IO) {
-            try {
-                val service = getService(context) ?: return@withContext false
-                val request = com.google.api.services.gmail.model.ModifyMessageRequest()
-                    .setRemoveLabelIds(listOf("UNREAD"))
-                service.users().messages().modify(USER, gmailId, request).execute()
-                true
-            } catch (e: Exception) {
-                Log.e(TAG, "markAsRead failed: ${e.message}")
-                false
-            }
+            val body = """{"removeLabelIds":["UNREAD"]}"""
+            post(context, "$BASE/messages/$gmailId/modify", body) != null
         }
 
     // Mark as spam
     suspend fun markAsSpam(context: Context, gmailId: String): Boolean =
         withContext(Dispatchers.IO) {
-            try {
-                val service = getService(context) ?: return@withContext false
-                val request = com.google.api.services.gmail.model.ModifyMessageRequest()
-                    .setAddLabelIds(listOf("SPAM"))
-                    .setRemoveLabelIds(listOf("INBOX"))
-                service.users().messages().modify(USER, gmailId, request).execute()
-                Log.i(TAG, "Email marked spam: $gmailId")
-                true
-            } catch (e: Exception) {
-                Log.e(TAG, "markAsSpam failed: ${e.message}")
-                false
-            }
+            val body = """{"addLabelIds":["SPAM"],"removeLabelIds":["INBOX"]}"""
+            val result = post(context, "$BASE/messages/$gmailId/modify", body)
+            if (result != null) Log.i(TAG, "Marked spam: $gmailId")
+            result != null
         }
 
-    // Search emails by query (Gmail search syntax)
-    suspend fun searchEmails(context: Context, query: String, maxResults: Long = 10): List<ParsedEmail> =
-        withContext(Dispatchers.IO) {
-            try {
-                val service = getService(context) ?: return@withContext emptyList()
-                val result = service.users().messages()
-                    .list(USER)
-                    .setQ(query)
-                    .setMaxResults(maxResults)
-                    .execute()
-                val messages = result.messages ?: return@withContext emptyList()
-                messages.mapNotNull { msg ->
-                    try { getFullEmail(context, msg.id) }
-                    catch (e: Exception) { null }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "searchEmails failed: ${e.message}")
-                emptyList()
-            }
+    // Search emails by Gmail query
+    suspend fun searchEmails(
+        context: Context,
+        query: String,
+        maxResults: Int = 10
+    ): List<ParsedEmail> = withContext(Dispatchers.IO) {
+        val encoded = java.net.URLEncoder.encode(query, "UTF-8")
+        val url = "$BASE/messages?q=$encoded&maxResults=$maxResults"
+        val result = get(context, url) ?: return@withContext emptyList()
+        val messages = result.getAsJsonArray("messages") ?: return@withContext emptyList()
+        messages.mapNotNull { el ->
+            val id = el.asJsonObject.get("id")?.asString ?: return@mapNotNull null
+            try { getFullEmail(context, id) } catch (e: Exception) { null }
         }
+    }
 
-    // Delete all emails matching a query — DESTRUCTIVE
+    // Delete all emails matching query — DESTRUCTIVE — must go through DestructiveActionGuard
     suspend fun deleteAllMatching(context: Context, query: String): Int =
         withContext(Dispatchers.IO) {
-            try {
-                val service = getService(context) ?: return@withContext 0
-                var count = 0
-                var pageToken: String? = null
-                do {
-                    val result = service.users().messages()
-                        .list(USER).setQ(query).setMaxResults(100)
-                        .also { if (pageToken != null) it.pageToken = pageToken }
-                        .execute()
-                    result.messages?.forEach { msg ->
-                        service.users().messages().trash(USER, msg.id).execute()
-                        count++
-                    }
-                    pageToken = result.nextPageToken
-                } while (pageToken != null)
-                Log.i(TAG, "Deleted $count emails matching: $query")
-                count
-            } catch (e: Exception) {
-                Log.e(TAG, "deleteAllMatching failed: ${e.message}")
-                0
-            }
+            var count = 0
+            var pageToken: String? = null
+            do {
+                val encoded = java.net.URLEncoder.encode(query, "UTF-8")
+                val url = "$BASE/messages?q=$encoded&maxResults=100" +
+                    (if (pageToken != null) "&pageToken=$pageToken" else "")
+                val result = get(context, url) ?: break
+                val messages = result.getAsJsonArray("messages") ?: break
+                messages.forEach { el ->
+                    val id = el.asJsonObject.get("id")?.asString ?: return@forEach
+                    post(context, "$BASE/messages/$id/trash", "{}")
+                    count++
+                }
+                pageToken = result.get("nextPageToken")?.asString
+            } while (pageToken != null)
+            Log.i(TAG, "Trashed $count emails matching: $query")
+            count
         }
 
-    // Check if email is a Google Voice text
+    // GVoice helpers
     fun isGoogleVoiceText(subject: String): Boolean =
         subject.startsWith(GV_SUBJECT_PREFIX)
 
-    // Parse Google Voice email into structured message
     fun parseGoogleVoiceEmail(email: ParsedEmail): GoogleVoiceMessage? {
         val regex = Regex("""New text message from (.+?)\s*\((\d{3})\)\s*(\d{3})-(\d{4})""")
         val match = regex.find(email.subject) ?: return null
         val senderName = match.groupValues[1].trim()
         val phone = "+1${match.groupValues[2]}${match.groupValues[3]}${match.groupValues[4]}"
-        return GoogleVoiceMessage(
-            senderName = senderName,
-            senderPhone = phone,
-            body = email.body.trim(),
-            originalEmail = email
-        )
+        return GoogleVoiceMessage(senderName, phone, email.body.trim(), email)
     }
 
     // --- Helpers ---
 
-    private fun extractBody(payload: com.google.api.services.gmail.model.MessagePart?): String {
+    private fun extractBody(payload: JsonObject?): String {
         if (payload == null) return ""
-        // Try plain text first
-        if (payload.mimeType == "text/plain" && payload.body?.data != null) {
-            return String(Base64.decode(payload.body.data, Base64.URL_SAFE))
+        val mimeType = payload.get("mimeType")?.asString ?: ""
+        val data = payload.getAsJsonObject("body")?.get("data")?.asString
+
+        if (mimeType == "text/plain" && data != null) {
+            return String(Base64.decode(data, Base64.URL_SAFE))
         }
-        // Try parts
-        payload.parts?.forEach { part ->
-            if (part.mimeType == "text/plain" && part.body?.data != null) {
-                return String(Base64.decode(part.body.data, Base64.URL_SAFE))
+
+        val parts = payload.getAsJsonArray("parts") ?: return ""
+        for (part in parts) {
+            val p = part.asJsonObject
+            val pType = p.get("mimeType")?.asString ?: continue
+            val pData = p.getAsJsonObject("body")?.get("data")?.asString
+            if (pType == "text/plain" && pData != null) {
+                return String(Base64.decode(pData, Base64.URL_SAFE))
             }
         }
-        // Try HTML parts as fallback
-        payload.parts?.forEach { part ->
-            if (part.mimeType == "text/html" && part.body?.data != null) {
-                val html = String(Base64.decode(part.body.data, Base64.URL_SAFE))
-                return android.text.Html.fromHtml(html, android.text.Html.FROM_HTML_MODE_COMPACT).toString()
+        // HTML fallback
+        for (part in parts) {
+            val p = part.asJsonObject
+            val pType = p.get("mimeType")?.asString ?: continue
+            val pData = p.getAsJsonObject("body")?.get("data")?.asString
+            if (pType == "text/html" && pData != null) {
+                val html = String(Base64.decode(pData, Base64.URL_SAFE))
+                return android.text.Html.fromHtml(
+                    html, android.text.Html.FROM_HTML_MODE_COMPACT
+                ).toString()
             }
         }
         return ""
@@ -337,23 +326,23 @@ object GmailApiClient {
     }
 }
 
-// Data classes used by GmailApiClient
+// Data classes
 data class ParsedEmail(
     val messageId: String,
-    val gmailId: String = "",
-    val threadId: String = "",
+    val gmailId:   String = "",
+    val threadId:  String = "",
     val fromEmail: String,
-    val fromName: String,
-    val toEmail: String = "",
-    val subject: String,
-    val body: String,
-    val date: String = "",
-    val isUnread: Boolean = true
+    val fromName:  String,
+    val toEmail:   String = "",
+    val subject:   String,
+    val body:      String,
+    val date:      String = "",
+    val isUnread:  Boolean = true
 )
 
 data class GoogleVoiceMessage(
-    val senderName: String,
-    val senderPhone: String,
-    val body: String,
+    val senderName:    String,
+    val senderPhone:   String,
+    val body:          String,
     val originalEmail: ParsedEmail
 )
