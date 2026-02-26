@@ -1,12 +1,14 @@
 package com.aigentik.app.ui
 
 import android.Manifest
+import android.app.Activity
 import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
@@ -16,18 +18,26 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.aigentik.app.R
 import com.aigentik.app.adapters.NotificationAdapter
+import com.aigentik.app.auth.GoogleAuthManager
 import com.aigentik.app.core.AigentikSettings
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.common.api.ApiException
 
-// OnboardingActivity v1.1
-// Flow: credentials → storage permission → notification access → model setup → main screen
-// Notification access required for NotificationListenerService inline reply transport
+// OnboardingActivity v2.0
+// - Removed all app password fields and references
+// - Added Sign in with Google (optional at setup, can do later in Settings)
+// - Matches new dark theme
+// - Flow: basic info → Google sign-in (optional) → permissions → model setup
 class OnboardingActivity : AppCompatActivity() {
 
     companion object {
+        private const val RC_SIGN_IN = 9001
         private const val STORAGE_PERMISSION_CODE = 201
     }
 
     private var tvStatus: TextView? = null
+    private var tvGoogleStatus: TextView? = null
+    private var btnGoogleSignIn: Button? = null
     private var isWaitingForNotificationAccess = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -35,12 +45,21 @@ class OnboardingActivity : AppCompatActivity() {
         AigentikSettings.init(this)
         setContentView(R.layout.activity_onboarding)
 
-        tvStatus = findViewById(R.id.tvStatus)
+        tvStatus       = findViewById(R.id.tvStatus)
+        tvGoogleStatus = findViewById(R.id.tvGoogleAccountStatus)
+        btnGoogleSignIn = findViewById(R.id.btnGoogleSignIn)
 
-        val btnStart = findViewById<Button>(R.id.btnSetup)
-            ?: findViewById(android.R.id.button1)
+        // Update Google sign-in status if already signed in
+        refreshGoogleUI()
 
-        btnStart?.setOnClickListener {
+        // Google sign-in button
+        btnGoogleSignIn?.setOnClickListener {
+            val client = GoogleAuthManager.buildSignInClient(this)
+            startActivityForResult(client.signInIntent, RC_SIGN_IN)
+        }
+
+        // Start Aigentik button
+        findViewById<Button>(R.id.btnSetup)?.setOnClickListener {
             val agentName      = findViewById<EditText>(R.id.etAgentName)
                 ?.text?.toString()?.trim().orEmpty().ifEmpty { "Aigentik" }
             val ownerName      = findViewById<EditText>(R.id.etOwnerName)
@@ -49,25 +68,62 @@ class OnboardingActivity : AppCompatActivity() {
                 ?.text?.toString()?.trim().orEmpty()
             val aigentikNumber = findViewById<EditText>(R.id.etAigentikNumber)
                 ?.text?.toString()?.trim().orEmpty()
-            val gmail          = findViewById<EditText>(R.id.etGmailAddress)
-                ?.text?.toString()?.trim().orEmpty()
-            val password       = findViewById<EditText>(R.id.etAppPassword)
-                ?.text?.toString()?.trim().orEmpty()
 
-            if (ownerName.isEmpty() || adminNumber.isEmpty() || gmail.isEmpty()) {
+            if (ownerName.isEmpty() || adminNumber.isEmpty()) {
                 tvStatus?.setTextColor(0xFFFF4444.toInt())
-                tvStatus?.text = "Your name, phone number, and Gmail are required"
+                tvStatus?.text = "Your name and phone number are required"
                 return@setOnClickListener
             }
 
+            // Save settings — no app password, Gmail address auto-filled from OAuth
+            val gmailAddress = GoogleAuthManager.getSignedInEmail(this) ?: ""
             AigentikSettings.saveFromOnboarding(
-                agentName, ownerName, adminNumber,
-                aigentikNumber, gmail, password
+                agentName    = agentName,
+                ownerName    = ownerName,
+                adminNumber  = adminNumber,
+                aigentikNumber = aigentikNumber,
+                gmailAddress = gmailAddress,
+                gmailAppPassword = "" // removed — OAuth only
             )
 
-            tvStatus?.setTextColor(0xFF00FF88.toInt())
+            tvStatus?.setTextColor(0xFF00D4FF.toInt())
             tvStatus?.text = "Saved — requesting permissions..."
             requestStoragePermission()
+        }
+    }
+
+    // Handle Google Sign-In result
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == RC_SIGN_IN) {
+            try {
+                val task = GoogleSignIn.getSignedInAccountFromIntent(data)
+                val account = task.getResult(ApiException::class.java)
+                GoogleAuthManager.onSignInSuccess(this, account)
+                AigentikSettings.isOAuthSignedIn = true
+                account.email?.let { AigentikSettings.gmailAddress = it }
+                refreshGoogleUI()
+                tvStatus?.setTextColor(0xFF00D4FF.toInt())
+                tvStatus?.text = "✅ Signed in as ${account.email}"
+            } catch (e: ApiException) {
+                android.util.Log.e("OnboardingActivity",
+                    "Sign-in failed code=${e.statusCode} msg=${e.message}")
+                tvStatus?.setTextColor(0xFFFFAA00.toInt())
+                tvStatus?.text = "Google sign-in failed (code ${e.statusCode}) — you can try again in Settings"
+            }
+        }
+    }
+
+    private fun refreshGoogleUI() {
+        val email = GoogleAuthManager.getSignedInEmail(this)
+        if (email != null) {
+            tvGoogleStatus?.text = "✅ Signed in as $email"
+            tvGoogleStatus?.setTextColor(0xFF00D4FF.toInt())
+            btnGoogleSignIn?.visibility = View.GONE
+        } else {
+            tvGoogleStatus?.text = "Not signed in — Gmail features disabled until signed in"
+            tvGoogleStatus?.setTextColor(0xFF7BA7CC.toInt())
+            btnGoogleSignIn?.visibility = View.VISIBLE
         }
     }
 
@@ -76,7 +132,7 @@ class OnboardingActivity : AppCompatActivity() {
         if (isWaitingForNotificationAccess) {
             isWaitingForNotificationAccess = false
             if (isNotificationAccessGranted()) {
-                tvStatus?.setTextColor(0xFF00FF88.toInt())
+                tvStatus?.setTextColor(0xFF00D4FF.toInt())
                 tvStatus?.text = "Notification access granted — continuing..."
                 launchModelManager()
             } else {
@@ -111,8 +167,8 @@ class OnboardingActivity : AppCompatActivity() {
 
     private fun checkNotificationAccess() {
         if (isNotificationAccessGranted()) {
-            tvStatus?.setTextColor(0xFF00FF88.toInt())
-            tvStatus?.text = "All permissions granted — setting up AI model..."
+            tvStatus?.setTextColor(0xFF00D4FF.toInt())
+            tvStatus?.text = "All set — launching AI model setup..."
             launchModelManager()
         } else {
             showNotificationAccessDialog()
@@ -121,16 +177,12 @@ class OnboardingActivity : AppCompatActivity() {
 
     private fun isNotificationAccessGranted(): Boolean {
         val flat = Settings.Secure.getString(
-            contentResolver,
-            "enabled_notification_listeners"
+            contentResolver, "enabled_notification_listeners"
         ) ?: return false
         val componentName = ComponentName(packageName, NotificationAdapter::class.java.name)
         return flat.split(":").any { entry ->
-            try {
-                ComponentName.unflattenFromString(entry) == componentName
-            } catch (e: Exception) {
-                false
-            }
+            try { ComponentName.unflattenFromString(entry) == componentName }
+            catch (e: Exception) { false }
         }
     }
 
@@ -144,8 +196,7 @@ class OnboardingActivity : AppCompatActivity() {
                 "1. Find Aigentik in the list\n" +
                 "2. Toggle it ON\n" +
                 "3. Tap Allow when prompted\n" +
-                "4. Return to this app\n\n" +
-                "Without this, Aigentik can read messages but cannot send replies."
+                "4. Return to this app"
             )
             .setPositiveButton("Open Settings") { _, _ ->
                 isWaitingForNotificationAccess = true
@@ -155,7 +206,7 @@ class OnboardingActivity : AppCompatActivity() {
             }
             .setNegativeButton("Skip for now") { _, _ ->
                 tvStatus?.setTextColor(0xFFFFAA00.toInt())
-                tvStatus?.text = "Skipped — auto-reply disabled until granted in Settings"
+                tvStatus?.text = "Skipped — auto-reply disabled until granted"
                 launchModelManager()
             }
             .setCancelable(false)
@@ -166,17 +217,15 @@ class OnboardingActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle("Notification Access Not Granted")
             .setMessage(
-                "Auto-reply to SMS and RCS messages will not work without this permission.\n\n" +
-                "You can grant it later in:\n" +
+                "Auto-reply will not work without this permission.\n\n" +
+                "Grant it later in:\n" +
                 "Settings > Apps > Special app access > Notification access > Aigentik"
             )
             .setPositiveButton("Try Again") { _, _ ->
                 isWaitingForNotificationAccess = true
                 startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
             }
-            .setNegativeButton("Continue Anyway") { _, _ ->
-                launchModelManager()
-            }
+            .setNegativeButton("Continue Anyway") { _, _ -> launchModelManager() }
             .setCancelable(false)
             .show()
     }
