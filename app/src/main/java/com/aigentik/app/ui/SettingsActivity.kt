@@ -143,7 +143,12 @@ class SettingsActivity : AppCompatActivity() {
                 refreshGoogleAccountUI()
                 showStatus("✅ Signed in as ${account.email}", success = true)
             } catch (e: ApiException) {
-                showStatus("❌ Sign-in failed: ${e.statusCode}", success = false)
+                // Log full error for debugging — common codes:
+                // 10 = DEVELOPER_ERROR (SHA1 mismatch or not in test users)
+                // 12500 = Sign-in failed (consent screen issue)
+                // 12501 = Sign-in cancelled by user
+                android.util.Log.e("SettingsActivity", "Sign-in failed code=${e.statusCode} msg=${e.message}")
+                showStatus("❌ Sign-in failed: code=${e.statusCode}", success = false)
             }
         }
     }
