@@ -14,11 +14,11 @@
       },
       "oauth_client": [
         {
-          "client_id": "630924077353-8iajquk6skm9hfg3b2sr5ojchqh06go4.apps.googleusercontent.com",
+          "client_id": "630924077353-gmv67c8n0lad1q5u9q6v8t41sf79l8uv.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
             "package_name": "com.aigentik.app",
-            "certificate_hash": "4a79d231c88af5a237fb39a80f25a01a6019cfb4"
+            "certificate_hash": "e676612 85f6c279d1434c5662c1e174e32679d80"
           }
         },
         {
