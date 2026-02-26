@@ -9,42 +9,32 @@ import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.Scope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-// GoogleAuthManager v1.0
-// Manages Google OAuth2 authentication for Aigentik
-// Uses Google Sign-In SDK — no app passwords, no manual tokens
-// Token refresh is automatic via GoogleAccountCredential
-//
-// Scopes granted:
-//   - Gmail full access (read, send, delete, labels, spam)
-//   - Contacts read (sync with ContactEngine)
-//   - Calendar read (future use)
-//
-// Flow:
-//   1. User taps "Sign in with Google" in SettingsActivity
-//   2. Google sign-in intent launches
-//   3. User picks account and grants permissions
-//   4. Account stored — credential available app-wide
-//   5. All API calls use credential.token (auto-refreshed)
+// GoogleAuthManager v1.2
+// — Fixed keystore SHA-1: e67661285f6c279d1434c5662c1e174e32679d80
+// — Uses Web client ID for requestIdToken (required for OAuth flow)
+// — Android client ID registered in Google Cloud for SHA-1 verification
+// — Scopes: gmail.modify, gmail.send, gmail.readonly, contacts.readonly
+// — NOTE: calendar.readonly reserved for future use, not requested at sign-in
+//   to minimize consent screen scope creep
 object GoogleAuthManager {
 
     private const val TAG = "GoogleAuthManager"
 
-    // Gmail OAuth2 scopes
+    // Gmail OAuth2 scopes — must match Google Cloud consent screen config
     val SCOPES = listOf(
         "https://www.googleapis.com/auth/gmail.modify",
         "https://www.googleapis.com/auth/gmail.send",
         "https://www.googleapis.com/auth/gmail.readonly",
-        "https://www.googleapis.com/auth/contacts.readonly",
-        "https://www.googleapis.com/auth/calendar.readonly"
+        "https://www.googleapis.com/auth/contacts.readonly"
     )
 
     private var signedInAccount: GoogleSignInAccount? = null
 
     // Initialize from stored account on app start
-    // Called by AigentikService.onCreate()
     fun initFromStoredAccount(context: Context): Boolean {
         val account = GoogleSignIn.getLastSignedInAccount(context)
         if (account != null) {
@@ -56,29 +46,25 @@ object GoogleAuthManager {
         return false
     }
 
-    // Called after successful sign-in in SettingsActivity
+    // Called after successful sign-in
     fun onSignInSuccess(context: Context, account: GoogleSignInAccount) {
         signedInAccount = account
         Log.i(TAG, "Signed in as: ${account.email}")
     }
 
-    // Build GoogleSignInClient for launching sign-in intent
+    // Build GoogleSignInClient
+    // NOTE: requestIdToken requires Web application client ID, not Android client ID
+    // Android client ID is registered in Google Cloud for SHA-1 verification only
     fun buildSignInClient(context: Context): GoogleSignInClient {
         val webClientId = context.getString(R.string.google_server_client_id)
         val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestIdToken(webClientId)
             .requestEmail()
             .requestScopes(
-                com.google.android.gms.common.api.Scope("https://www.googleapis.com/auth/gmail.modify"),
-                com.google.android.gms.common.api.Scope("https://www.googleapis.com/auth/gmail.send"),
-                com.google.android.gms.common.api.Scope("https://www.googleapis.com/auth/contacts.readonly")
-            )
-            .requestScopes(
-                com.google.android.gms.common.api.Scope(SCOPES[0]),
-                com.google.android.gms.common.api.Scope(SCOPES[1]),
-                com.google.android.gms.common.api.Scope(SCOPES[2]),
-                com.google.android.gms.common.api.Scope(SCOPES[3]),
-                com.google.android.gms.common.api.Scope(SCOPES[4])
+                Scope(SCOPES[0]), // gmail.modify
+                Scope(SCOPES[1]), // gmail.send
+                Scope(SCOPES[2]), // gmail.readonly
+                Scope(SCOPES[3])  // contacts.readonly
             )
             .build()
         return GoogleSignIn.getClient(context, gso)
@@ -111,7 +97,6 @@ object GoogleAuthManager {
     fun getSignedInEmail(context: Context): String? =
         GoogleSignIn.getLastSignedInAccount(context)?.email
 
-    // Sign out — clears stored account
     fun signOut(context: Context, onComplete: () -> Unit = {}) {
         buildSignInClient(context).signOut().addOnCompleteListener {
             signedInAccount = null
