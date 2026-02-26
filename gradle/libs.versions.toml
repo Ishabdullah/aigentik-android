@@ -8,6 +8,14 @@ constraintlayout = "1.0.1"
 coroutines = "1.8.0"
 javamail = "1.6.2"
 room = "2.6.1"
+googleAuthVersion = "20.7.0"
+googleApiClient = "2.2.0"
+googleApiGmail = "1.32.1"
+googleApiPeople = "v1-rev20220531-2.0.0"
+credentialsVersion = "1.3.0"
+googleId = "1.1.1"
+okhttp = "4.12.0"
+gson = "2.10.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -20,6 +28,15 @@ javamail-activation = { group = "com.sun.mail", name = "android-activation", ver
 room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
 room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
 room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+google-auth = { group = "com.google.android.gms", name = "play-services-auth", version.ref = "googleAuthVersion" }
+google-api-client-android = { group = "com.google.api-client", name = "google-api-client-android", version.ref = "googleApiClient" }
+google-api-gmail = { group = "com.google.apis", name = "google-api-services-gmail", version.ref = "googleApiGmail" }
+google-api-people = { group = "com.google.apis", name = "google-api-services-people", version.ref = "googleApiPeople" }
+credentials = { group = "androidx.credentials", name = "credentials", version.ref = "credentialsVersion" }
+credentials-play-services = { group = "androidx.credentials", name = "credentials-play-services-auth", version.ref = "credentialsVersion" }
+google-id = { group = "com.google.android.libraries.identity.googleid", name = "googleid", version.ref = "googleId" }
+okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

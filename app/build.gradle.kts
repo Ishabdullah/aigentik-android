@@ -12,8 +12,8 @@ android {
         applicationId = "com.aigentik.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 26
-        versionName = "1.0.9"
+        versionCode = 27
+        versionName = "1.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
@@ -97,5 +97,16 @@ dependencies {
     implementation(libs.javamail.activation)
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
+
+    // Google OAuth2 + API clients
+    implementation(libs.google.auth)
+    implementation(libs.google.api.client.android)
+    implementation(libs.google.api.gmail)
+    implementation(libs.google.api.people)
+    implementation(libs.credentials)
+    implementation(libs.credentials.play.services)
+    implementation(libs.google.id)
+    implementation(libs.okhttp)
+    implementation(libs.gson)
     kapt(libs.room.compiler)
 }

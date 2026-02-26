@@ -37,6 +37,9 @@ class AigentikService : Service() {
     override fun onCreate() {
         super.onCreate()
         AigentikSettings.init(this)
+        // Restore Google OAuth session if previously signed in
+        val oauthRestored = GoogleAuthManager.initFromStoredAccount(this)
+        Log.i(TAG, "OAuth session restored: $oauthRestored")
         createNotificationChannel()
         startForeground(NOTIFICATION_ID,
             buildNotification("${AigentikSettings.agentName} starting..."))

@@ -47,6 +47,19 @@ object AigentikSettings {
         get() = prefs.getString(KEY_AIGENTIK_NUMBER, "") ?: ""
         set(value) = prefs.edit().putString(KEY_AIGENTIK_NUMBER, value).apply()
 
+    // Admin password — stored as SHA-256 hash, never plaintext
+    var adminPasswordHash: String
+        get() = prefs.getString(KEY_ADMIN_PASS_HASH, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_ADMIN_PASS_HASH, value).apply()
+
+    var adminUsername: String
+        get() = prefs.getString(KEY_ADMIN_USERNAME, ownerName) ?: ownerName
+        set(value) = prefs.edit().putString(KEY_ADMIN_USERNAME, value).apply()
+
+    var isOAuthSignedIn: Boolean
+        get() = prefs.getBoolean(KEY_OAUTH_SIGNED_IN, false)
+        set(value) = prefs.edit().putBoolean(KEY_OAUTH_SIGNED_IN, value).apply()
+
     var gmailAddress: String
         get() = prefs.getString(KEY_GMAIL_ADDRESS, "") ?: ""
         set(value) = prefs.edit().putString(KEY_GMAIL_ADDRESS, value).apply()

@@ -2,6 +2,8 @@ package com.aigentik.app.core
 
 import android.util.Log
 import com.aigentik.app.ai.AiEngine
+import com.aigentik.app.auth.AdminAuthManager
+import com.aigentik.app.auth.DestructiveActionGuard
 import com.aigentik.app.core.PhoneNormalizer
 import com.aigentik.app.email.EmailMonitor
 import com.aigentik.app.email.EmailRouter
@@ -56,7 +58,39 @@ object MessageEngine {
             Log.i(TAG, "System paused — ignoring")
             return
         }
-        val isAdmin = PhoneNormalizer.isSameNumber(message.sender, adminNumber) ||
+        // Admin check — chat screen always trusted, remote channels need auth
+        val isAdminChannel = message.channel == Message.Channel.CHAT
+        val channelKey = message.sender
+
+        // Check for admin login format in message body (remote channels)
+        if (!isAdminChannel) {
+            val creds = AdminAuthManager.parseAdminMessage(message.body)
+            if (creds != null) {
+                if (AdminAuthManager.authenticate(creds, channelKey)) {
+                    if (creds.command.isNotBlank()) {
+                        // Process the command that came with the login
+                        val cmdResult = processAdminCommand(creds.command, channelKey, message)
+                        notify(channelKey, cmdResult)
+                    } else {
+                        notify(channelKey, "✅ Admin authenticated. Session active for 30 minutes.")
+                    }
+                } else {
+                    notify(channelKey, "❌ Authentication failed. Check username and password.")
+                }
+                return
+            }
+
+            // Check for pending destructive action confirmation
+            if (DestructiveActionGuard.hasPending(channelKey)) {
+                scope.launch {
+                    val result = DestructiveActionGuard.confirmWithPassword(channelKey, message.body.trim())
+                    notify(channelKey, result)
+                }
+                return
+            }
+        }
+
+        val isAdmin = isAdminChannel || AdminAuthManager.hasActiveSession(channelKey) ||
                       message.sender.lowercase() == AigentikSettings.gmailAddress.lowercase()
 
         scope.launch {
