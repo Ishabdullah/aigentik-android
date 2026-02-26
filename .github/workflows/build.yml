@@ -75,6 +75,12 @@ jobs:
         with:
           gradle-version: "8.9"
 
+      - name: Print debug keystore SHA-1
+        run: |
+          mkdir -p ~/.android
+          keytool -genkey -v -keystore ~/.android/debug.keystore             -alias androiddebugkey -storepass android -keypass android             -keyalg RSA -keysize 2048 -validity 10000             -dname "CN=Android Debug,O=Android,C=US" 2>/dev/null || true
+          keytool -list -v             -keystore ~/.android/debug.keystore             -alias androiddebugkey             -storepass android             -keypass android 2>/dev/null | grep "SHA1:"
+
       - name: Build Debug APK
         run: |
           gradle assembleDebug \
