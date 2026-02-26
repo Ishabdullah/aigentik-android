@@ -106,7 +106,6 @@ object GoogleAuthManager {
     // Sign out — clears stored account
     fun signOut(context: Context, onComplete: () -> Unit = {}) {
         buildSignInClient(context).signOut().addOnCompleteListener {
-            credential = null
             signedInAccount = null
             Log.i(TAG, "Signed out")
             onComplete()

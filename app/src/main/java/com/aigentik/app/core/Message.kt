@@ -15,6 +15,7 @@ data class Message(
     enum class Channel {
         SMS,          // Traditional SMS
         NOTIFICATION, // RCS intercepted via notification listener
-        EMAIL         // Google Voice forwarded email
+        EMAIL,        // Google Voice forwarded email
+        CHAT          // In-app chat screen — always admin trusted, no auth needed
     }
 }

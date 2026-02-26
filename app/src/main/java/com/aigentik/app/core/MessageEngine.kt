@@ -7,7 +7,6 @@ import com.aigentik.app.auth.DestructiveActionGuard
 import com.aigentik.app.core.PhoneNormalizer
 import com.aigentik.app.email.EmailMonitor
 import com.aigentik.app.email.EmailRouter
-import com.aigentik.app.email.GmailClient
 import com.aigentik.app.sms.SmsRouter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -62,29 +61,41 @@ object MessageEngine {
         val isAdminChannel = message.channel == Message.Channel.CHAT
         val channelKey = message.sender
 
-        // Check for admin login format in message body (remote channels)
+        // Check for admin login format in message body (remote channels only)
+        // Format: Admin: Ish\nPassword: xxxx\n<command>
         if (!isAdminChannel) {
             val creds = AdminAuthManager.parseAdminMessage(message.body)
             if (creds != null) {
                 if (AdminAuthManager.authenticate(creds, channelKey)) {
                     if (creds.command.isNotBlank()) {
-                        // Process the command that came with the login
-                        val cmdResult = processAdminCommand(creds.command, channelKey, message)
-                        notify(channelKey, cmdResult)
+                        // Auth + command in one message — process command immediately
+                        // Route reply back through same channel the message arrived on
+                        scope.launch {
+                            val authedMessage = message.copy(body = creds.command)
+                            handleAdminCommand(authedMessage)
+                        }
                     } else {
-                        notify(channelKey, "✅ Admin authenticated. Session active for 30 minutes.")
+                        // Auth only — confirm session started
+                        val ack = "✅ Admin authenticated. Session active for 30 minutes."
+                        notify(ack)
+                        replyToSender(message, ack)
                     }
                 } else {
-                    notify(channelKey, "❌ Authentication failed. Check username and password.")
+                    val fail = "❌ Authentication failed. Check username and password."
+                    notify(fail)
+                    replyToSender(message, fail)
                 }
                 return
             }
 
-            // Check for pending destructive action confirmation
+            // Check if this message is a password confirmation for a pending destructive action
             if (DestructiveActionGuard.hasPending(channelKey)) {
                 scope.launch {
-                    val result = DestructiveActionGuard.confirmWithPassword(channelKey, message.body.trim())
-                    notify(channelKey, result)
+                    val result = DestructiveActionGuard.confirmWithPassword(
+                        channelKey, message.body.trim()
+                    )
+                    notify(result)
+                    replyToSender(message, result)
                 }
                 return
             }
@@ -225,7 +236,8 @@ object MessageEngine {
                             contact?.relationship, contact?.instructions
                         )
                         val subject = "Hi from $ownerName"
-                        val sent = GmailClient.sendEmail(toEmail, subject, body)
+                        // TODO: wire to GmailApiClient.sendEmail() after context plumbing
+                        val sent = false
                         val name = contact?.name ?: target
                         notify(if (sent) "✅ Email sent to $name" else "❌ Failed to email $name")
                     }
