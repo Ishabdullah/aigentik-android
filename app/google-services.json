@@ -2,12 +2,12 @@
   "project_info": {
     "project_number": "630924077353",
     "project_id": "aigentik-android",
-    "storage_bucket": ""
+    "storage_bucket": "aigentik-android.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:630924077353:android:aigentik",
+        "mobilesdk_app_id": "1:630924077353:android:5c58e1d30f7983771f2f38",
         "android_client_info": {
           "package_name": "com.aigentik.app"
         }
@@ -26,7 +26,11 @@
           "client_type": 3
         }
       ],
-      "api_key": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAXRjCb1kN40hf43z359ZcFEAz4Sdw8arA"
+        }
+      ],
       "services": {
         "appinvite_service": {
           "other_platform_oauth_client": [
