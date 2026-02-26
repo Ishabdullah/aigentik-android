@@ -1,0 +1,43 @@
+{
+  "project_info": {
+    "project_number": "630924077353",
+    "project_id": "aigentik-android",
+    "storage_bucket": ""
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:630924077353:android:aigentik",
+        "android_client_info": {
+          "package_name": "com.aigentik.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "630924077353-8iajquk6skm9hfg3b2sr5ojchqh06go4.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.aigentik.app",
+            "certificate_hash": "4a79d231c88af5a237fb39a80f25a01a6019cfb4"
+          }
+        },
+        {
+          "client_id": "630924077353-oopagdmapkve24ehb6pjppeph2bf292c.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "630924077353-oopagdmapkve24ehb6pjppeph2bf292c.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
