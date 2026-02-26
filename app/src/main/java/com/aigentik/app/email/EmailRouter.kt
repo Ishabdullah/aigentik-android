@@ -82,7 +82,7 @@ object EmailRouter {
 
     // Direct email send — used by MessageEngine send_email command
     // TODO: migrate to GmailApiClient once context injection is wired
-    fun sendEmailDirect(to: String, subject: String, body: String): Boolean {
+    suspend fun sendEmailDirect(to: String, subject: String, body: String): Boolean {
         return try {
             GmailClient.sendEmail(to, subject, body)
         } catch (e: Exception) {
