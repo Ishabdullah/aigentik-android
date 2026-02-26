@@ -83,11 +83,12 @@ class AigentikService : Service() {
                     Log.w(TAG, "No model — fallback mode")
                 }
 
-                // Gmail
-                // OAuth2 — no app password needed
-                // EmailMonitor is notification-driven, no start() needed
-                EmailMonitor.init(this)
-                EmailRouter.init(this)
+                // Gmail — OAuth2, notification-driven
+                // NOTE: applicationContext captured outside coroutine scope
+                // 'this' inside launch{} refers to CoroutineScope, not Service
+                val appCtx = applicationContext
+                EmailMonitor.init(appCtx)
+                EmailRouter.init(appCtx)
                 Log.i(TAG, "Email services initialized — waiting for Gmail notifications")
 
                 // MessageEngine — no replySender arg now (routing is internal)
@@ -106,7 +107,7 @@ class AigentikService : Service() {
                     ChatBridge.post(message)
                 }
 
-                ConnectionWatchdog.start(this)
+                ConnectionWatchdog.start(applicationContext)
 
                 val modelStatus = if (AiEngine.isReady()) "AI ready" else "AI fallback"
                 updateNotification(
