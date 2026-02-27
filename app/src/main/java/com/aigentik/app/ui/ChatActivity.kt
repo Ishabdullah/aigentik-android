@@ -19,6 +19,8 @@ import com.aigentik.app.core.Message
 import com.aigentik.app.core.MessageEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -35,7 +37,8 @@ import java.util.Locale
 // Responses come back via ChatBridge → Room DB → collectLatest → UI.
 class ChatActivity : AppCompatActivity() {
 
-    private val scope = CoroutineScope(Dispatchers.Main)
+    // SupervisorJob — exceptions in one child coroutine don't cascade to others
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private lateinit var db: ChatDatabase
     private val timeFormat = SimpleDateFormat("HH:mm", Locale.US)
 
@@ -57,6 +60,13 @@ class ChatActivity : AppCompatActivity() {
         AigentikSettings.init(this)
         db = ChatDatabase.getInstance(this)
         com.aigentik.app.core.ChatBridge.init(db)
+
+        // Wire chatNotifier so MessageEngine responses appear in chat even if
+        // AigentikService isn't running yet (service also sets this on startup)
+        com.aigentik.app.core.MessageEngine.chatNotifier = { com.aigentik.app.core.ChatBridge.post(it) }
+
+        // ContactEngine needed for status/find local commands
+        ContactEngine.init(applicationContext)
 
         messageContainer = findViewById(R.id.messageContainer)
         scrollView        = findViewById(R.id.scrollView)
@@ -91,41 +101,51 @@ class ChatActivity : AppCompatActivity() {
         showThinking("Thinking...")
 
         scope.launch {
-            // Save user message
-            withContext(Dispatchers.IO) {
-                db.chatDao().insert(ChatMessage(role = "user", content = text))
-            }
-
-            // Fast local commands — no service required
-            val local = resolveLocalCommand(text.lowercase().trim(), text)
-            if (local != null) {
+            try {
+                // Save user message
                 withContext(Dispatchers.IO) {
-                    db.chatDao().insert(ChatMessage(role = "assistant", content = local))
+                    db.chatDao().insert(ChatMessage(role = "user", content = text))
                 }
-                awaitingResponse = false
-                hideThinking()
-                btnSend.isEnabled = true
-                return@launch
-            }
 
-            // Route to MessageEngine — Gmail, AI, SMS, contacts, channels, etc.
-            // Response arrives via chatNotifier → ChatBridge.post() → Room DB → observeMessages()
-            val msg = Message(
-                id         = System.currentTimeMillis().toString(),
-                sender     = "chat",
-                senderName = AigentikSettings.ownerName.ifBlank { null },
-                body       = text,
-                timestamp  = System.currentTimeMillis(),
-                channel    = Message.Channel.CHAT
-            )
-            withContext(Dispatchers.IO) {
-                MessageEngine.onMessageReceived(msg)
-            }
+                // Fast local commands — no service required
+                val local = resolveLocalCommand(text.lowercase().trim(), text)
+                if (local != null) {
+                    withContext(Dispatchers.IO) {
+                        db.chatDao().insert(ChatMessage(role = "assistant", content = local))
+                    }
+                    awaitingResponse = false
+                    hideThinking()
+                    btnSend.isEnabled = true
+                    return@launch
+                }
 
-            // Safety timeout — re-enable after 45s if chatNotifier never fires
-            // (e.g. service not started, OAuth not set up)
-            delay(45_000)
-            if (awaitingResponse) {
+                // Route to MessageEngine — Gmail, AI, SMS, contacts, channels, etc.
+                // Response arrives via chatNotifier → ChatBridge.post() → Room DB → observeMessages()
+                val msg = Message(
+                    id         = System.currentTimeMillis().toString(),
+                    sender     = "chat",
+                    senderName = AigentikSettings.ownerName.ifBlank { null },
+                    body       = text,
+                    timestamp  = System.currentTimeMillis(),
+                    channel    = Message.Channel.CHAT
+                )
+                withContext(Dispatchers.IO) {
+                    MessageEngine.onMessageReceived(msg)
+                }
+
+                // Safety timeout — re-enable after 45s if chatNotifier never fires
+                delay(45_000)
+                if (awaitingResponse) {
+                    awaitingResponse = false
+                    hideThinking()
+                    btnSend.isEnabled = true
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("ChatActivity", "sendMessage error: ${e.message}", e)
+                withContext(Dispatchers.IO) {
+                    db.chatDao().insert(ChatMessage(role = "assistant",
+                        content = "⚠️ Error: ${e.message?.take(120) ?: "unknown error"}"))
+                }
                 awaitingResponse = false
                 hideThinking()
                 btnSend.isEnabled = true
@@ -261,5 +281,6 @@ class ChatActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        scope.cancel()
     }
 }
