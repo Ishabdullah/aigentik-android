@@ -19,7 +19,7 @@ import javax.mail.Session
 import javax.mail.internet.InternetAddress
 import javax.mail.internet.MimeMessage
 
-// GmailApiClient v1.1 — Gmail REST API via OkHttp
+// GmailApiClient v1.2 — Gmail REST API via OkHttp
 // Uses OAuth2 Bearer token from GoogleAuthManager
 // No google-api-services-gmail dependency needed — direct REST calls
 //
@@ -34,7 +34,9 @@ object GmailApiClient {
 
     private const val TAG = "GmailApiClient"
     private const val BASE = "https://gmail.googleapis.com/gmail/v1/users/me"
-    private const val GV_SUBJECT_PREFIX = "New text message from"
+    private const val GV_SUBJECT_PREFIX       = "New text message from"
+    private const val GV_GROUP_PREFIX         = "New group text message"
+    private const val GV_FOOTER_MARKER        = "To respond to this text message"
 
     private val http = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -432,15 +434,39 @@ object GmailApiClient {
         }
 
     // GVoice helpers
+
     fun isGoogleVoiceText(subject: String): Boolean =
-        subject.startsWith(GV_SUBJECT_PREFIX)
+        subject.startsWith(GV_SUBJECT_PREFIX) || subject.startsWith(GV_GROUP_PREFIX)
 
     fun parseGoogleVoiceEmail(email: ParsedEmail): GoogleVoiceMessage? {
-        val regex = Regex("""New text message from (.+?)\s*\((\d{3})\)\s*(\d{3})-(\d{4})""")
-        val match = regex.find(email.subject) ?: return null
-        val senderName = match.groupValues[1].trim()
-        val phone = "+1${match.groupValues[2]}${match.groupValues[3]}${match.groupValues[4]}"
-        return GoogleVoiceMessage(senderName, phone, email.body.trim(), email)
+        // Individual text: "New text message from NAME (XXX) XXX-XXXX"
+        val individualRegex = Regex("""New text message from (.+?)\s*\((\d{3})\)\s*(\d{3})-(\d{4})""")
+        val match = individualRegex.find(email.subject)
+
+        val senderName: String
+        val senderPhone: String
+
+        if (match != null) {
+            senderName  = match.groupValues[1].trim()
+            senderPhone = "+1${match.groupValues[2]}${match.groupValues[3]}${match.groupValues[4]}"
+        } else if (email.subject.startsWith(GV_GROUP_PREFIX)) {
+            // Group text: "New group text message from NAME" — phone not in subject
+            val groupMatch = Regex("""New group text message from (.+)""").find(email.subject)
+            senderName  = groupMatch?.groupValues?.get(1)?.trim() ?: "Group"
+            senderPhone = email.fromEmail  // use GVoice address as identifier for routing
+        } else {
+            return null
+        }
+
+        // Strip Google Voice footer ("To respond to this text message, reply to this email...")
+        var body = email.body
+        val footerIdx = body.indexOf(GV_FOOTER_MARKER)
+        if (footerIdx != -1) body = body.substring(0, footerIdx)
+
+        // Strip any HTML tags that survive the body extractor
+        body = body.replace(Regex("<[^>]*>"), "").trim()
+
+        return GoogleVoiceMessage(senderName, senderPhone, body, email)
     }
 
     // --- Helpers ---
