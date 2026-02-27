@@ -1,12 +1,15 @@
 # Aigentik Android — Claude Code Context
+
 You are continuing development of Aigentik — a privacy-first Android AI assistant app. Here is the complete project context.
 
 ## PROJECT OVERVIEW
 - App: Aigentik Android (com.aigentik.app)
 - Repo: ~/aigentik-android (local Termux) + GitHub (builds via Actions)
-- Current version: v1.4.1 (versionCode 51)
+- **Current version: v1.4.5 (versionCode 55)**
 - Developer environment: Samsung S24 Ultra, Termux only — NO Android Studio, NO local Gradle builds
 - All builds happen via GitHub Actions → APK downloaded and sideloaded
+
+---
 
 ## PRIVACY POLICY — STRICT ENFORCEMENT REQUIRED
 
@@ -32,8 +35,8 @@ These policies are non-negotiable. Claude MUST refuse any implementation that vi
 ### 4. OAuth2 / API Access Rules
 - OAuth2 is used to authenticate with Google APIs (Gmail, Contacts) only
 - All API calls are direct device→Google REST calls (OkHttp)
-- Scopes requested: gmail.modify, gmail.send, contacts.readonly
-- No scope for cloud infra (Pub/Sub was added and removed — never add it back)
+- Scopes: gmail.modify, gmail.send (contacts.readonly was in scope list but People API not used yet)
+- No scope for cloud infra (Pub/Sub was added in v1.4.0 and removed in v1.4.1 — never add it back)
 
 ### 5. Notification Handling
 - Gmail trigger: Gmail app notification → NotificationListenerService → OAuth2 REST fetch
@@ -52,56 +55,111 @@ These policies are non-negotiable. Claude MUST refuse any implementation that vi
 ---
 
 ## ARCHITECTURE
+
 - On-device AI inference via llama.cpp (C++ NDK, arm64-v8a)
 - Model: GGUF format stored on device /sdcard or internal storage
 - SMS/RCS auto-reply via NotificationListenerService (Samsung Messages inline reply)
 - Gmail monitoring via Gmail app notification → NotificationAdapter → EmailMonitor → Gmail REST API (OAuth2)
-- Google Voice SMS forwarded as Gmail → parsed and replied to via email thread
+- Google Voice SMS forwarded as Gmail → parsed (subject line parsing) and replied via email thread
 - Gmail natural language interface: chat/SMS commands → AiEngine.interpretCommand() → Gmail API actions
 - No cloud backend, no Firebase SDK, no polling loops — everything on-device
 - AI runs fully offline (llama.cpp JNI bridge)
 - historyId cursor stored in SharedPreferences — primed from Gmail profile API on start, advanced per notification
+- **Chat routes through MessageEngine** — ChatActivity.sendMessage() → MessageEngine.onMessageReceived(CHAT) → response via chatNotifier → ChatBridge.post() → Room DB → collectLatest Flow
+
+---
 
 ## KEY FILES
-- app/src/main/java/com/aigentik/app/core/AigentikService.kt — main foreground service (v1.5)
-- app/src/main/java/com/aigentik/app/core/AigentikSettings.kt — SharedPreferences wrapper
-- app/src/main/java/com/aigentik/app/core/MessageEngine.kt — AI command processor (v1.3)
-- app/src/main/java/com/aigentik/app/core/Message.kt — unified message object (has subject field)
-- app/src/main/java/com/aigentik/app/core/ChannelManager.kt — channel state tracker
-- app/src/main/java/com/aigentik/app/core/RuleEngine.kt — message filtering rules
-- app/src/main/java/com/aigentik/app/core/ContactEngine.kt — contact database + Android sync
-- app/src/main/java/com/aigentik/app/core/MessageDeduplicator.kt — SMS/notification dedup
-- app/src/main/java/com/aigentik/app/core/PhoneNormalizer.kt — E.164 phone formatting
-- app/src/main/java/com/aigentik/app/core/ChatBridge.kt — service→Room DB bridge
-- app/src/main/java/com/aigentik/app/auth/GoogleAuthManager.kt — OAuth2 manager (v1.7)
-- app/src/main/java/com/aigentik/app/auth/AdminAuthManager.kt — remote admin auth
-- app/src/main/java/com/aigentik/app/auth/DestructiveActionGuard.kt — destructive action confirmation (word-by-word code extraction)
-- app/src/main/java/com/aigentik/app/email/GmailApiClient.kt — Gmail REST API via OkHttp
-- app/src/main/java/com/aigentik/app/email/EmailMonitor.kt — notification-triggered Gmail fetch (v4.0)
-- app/src/main/java/com/aigentik/app/email/EmailRouter.kt — routes email replies
-- app/src/main/java/com/aigentik/app/email/GmailHistoryClient.kt — Gmail History API + historyId storage (v1.1)
-- app/src/main/java/com/aigentik/app/adapters/NotificationAdapter.kt — NotificationListenerService (v1.3)
-- app/src/main/java/com/aigentik/app/adapters/SmsAdapter.kt — SMS BroadcastReceiver
-- app/src/main/java/com/aigentik/app/adapters/NotificationReplyRouter.kt — inline reply PendingIntent
-- app/src/main/java/com/aigentik/app/ai/AiEngine.kt — AI inference + command parser (CommandResult has query field)
-- app/src/main/java/com/aigentik/app/ai/LlamaJNI.kt — JNI wrapper for llama.cpp
-- app/src/main/java/com/aigentik/app/ui/MainActivity.kt — dashboard
-- app/src/main/java/com/aigentik/app/ui/ChatActivity.kt — chat interface
-- app/src/main/java/com/aigentik/app/ui/SettingsActivity.kt — settings + Google sign-in
-- app/src/main/java/com/aigentik/app/ui/OnboardingActivity.kt — first run setup
-- app/src/main/java/com/aigentik/app/ui/ModelManagerActivity.kt — model download/load
-- app/src/main/java/com/aigentik/app/chat/ChatDatabase.kt — Room database singleton
-- app/src/main/java/com/aigentik/app/chat/ChatMessage.kt — Room entity
-- app/src/main/java/com/aigentik/app/chat/ChatDao.kt — Room DAO
-- app/src/main/java/com/aigentik/app/system/BootReceiver.kt — auto-start after reboot
-- app/src/main/java/com/aigentik/app/system/ConnectionWatchdog.kt — OAuth session monitor
-- app/src/main/java/com/aigentik/app/system/BatteryOptimizationHelper.kt — battery settings
-- app/src/main/cpp/llama_jni.cpp — JNI bridge C++ (Q8_0 KV, 8k ctx, 6 threads)
-- app/src/main/cpp/CMakeLists.txt — CMake build for llama.cpp
-- app/google-services.json — Firebase/Google OAuth config (OAuth only, no Firebase SDK)
-- .github/workflows/build.yml — CI build pipeline
+
+- `core/AigentikService.kt` — main foreground service (v1.5)
+- `core/AigentikSettings.kt` — SharedPreferences wrapper
+- `core/MessageEngine.kt` — AI command processor (v1.3)
+- `core/Message.kt` — unified message object (has `subject` field for email)
+- `core/ChannelManager.kt` — channel state tracker (SMS, GVOICE, EMAIL)
+- `core/RuleEngine.kt` — message filtering rules (persist to files/rules/)
+- `core/ContactEngine.kt` — contact database + Android contacts sync
+- `core/MessageDeduplicator.kt` — SMS/notification dedup
+- `core/PhoneNormalizer.kt` — E.164 phone formatting
+- `core/ChatBridge.kt` — service→Room DB bridge (posts assistant responses to chat)
+- `auth/GoogleAuthManager.kt` — OAuth2 manager (v1.7)
+- `auth/AdminAuthManager.kt` — remote admin auth (30-min sessions)
+- `auth/DestructiveActionGuard.kt` — two-step confirmation for Gmail destructive actions
+- `email/GmailApiClient.kt` — Gmail REST API via OkHttp (v1.2)
+- `email/EmailMonitor.kt` — notification-triggered Gmail fetch (v4.0, no polling)
+- `email/EmailRouter.kt` — routes email replies and owner notifications
+- `email/GmailHistoryClient.kt` — Gmail History API + on-device historyId persistence (v1.1)
+- `adapters/NotificationAdapter.kt` — NotificationListenerService for RCS + Gmail triggers (v1.3)
+- `adapters/SmsAdapter.kt` — SMS BroadcastReceiver
+- `adapters/NotificationReplyRouter.kt` — inline reply via PendingIntent
+- `ai/AiEngine.kt` — AI inference controller + command parser (CommandResult has `query` field)
+- `ai/LlamaJNI.kt` — JNI wrapper for llama.cpp
+- `ui/MainActivity.kt` — dashboard
+- `ui/ChatActivity.kt` — chat interface (v1.0 — routes through MessageEngine, not standalone LLM)
+- `ui/SettingsActivity.kt` — settings + Google sign-in
+- `ui/OnboardingActivity.kt` — first run setup
+- `ui/ModelManagerActivity.kt` — model download/load
+- `chat/ChatDatabase.kt` — Room database singleton
+- `chat/ChatMessage.kt` — Room entity
+- `chat/ChatDao.kt` — Room DAO
+- `system/BootReceiver.kt` — auto-start after reboot
+- `system/ConnectionWatchdog.kt` — OAuth session monitor
+- `system/BatteryOptimizationHelper.kt` — battery settings
+- `cpp/llama_jni.cpp` — JNI bridge (Q8_0 KV, 8k ctx, 6 threads, warm-up on load)
+- `cpp/CMakeLists.txt` — CMake build for llama.cpp
+- `google-services.json` — Firebase/Google OAuth config (OAuth only, no Firebase SDK)
+- `.github/workflows/build.yml` — CI build pipeline
+
+---
 
 ## CHANGE LOG
+
+### v1.4.5 — Fix chat crash (current, 2026-02-27)
+Fixed three bugs in ChatActivity that caused crashes and silent response failures when using chat:
+
+1. **`CoroutineScope` without `SupervisorJob`** — Plain `Job()` means any exception in one child
+   coroutine (sendMessage or observeMessages) cascades and cancels the whole scope → app crash.
+   Fixed: `CoroutineScope(Dispatchers.Main + SupervisorJob())`.
+2. **`MessageEngine.chatNotifier` never set by ChatActivity** — chatNotifier is set by
+   AigentikService on startup. If service wasn't running yet, or hadn't initialized, notify()
+   calls were silently dropped. Chat appeared to work but responses never appeared.
+   Fixed: ChatActivity.onCreate() now sets `MessageEngine.chatNotifier = { ChatBridge.post(it) }`.
+3. **`ContactEngine.init()` never called from ChatActivity** — Local commands like "status"
+   and "find [name]" call ContactEngine methods. Without init(), these threw NPE, which (before
+   SupervisorJob fix) crashed the whole scope.
+   Fixed: `ContactEngine.init(applicationContext)` in onCreate().
+4. **No error handling in sendMessage()** — Added try-catch around the full sendMessage body.
+   Errors now show as an assistant message in chat instead of silently crashing.
+5. **scope.cancel() missing from onDestroy()** — Scope kept running after activity destroyed.
+   Fixed: scope.cancel() added to onDestroy().
+
+- Build: versionCode 55, versionName 1.4.5
+
+### v1.4.4 — Chat routes through MessageEngine (2026-02-27, superseded by v1.4.5 same session)
+Complete rewrite of ChatActivity. Root cause: old ChatActivity had generateResponse() that called
+LlamaJNI.generate() directly with a generic "you are a personal AI assistant" prompt, bypassing
+MessageEngine and all Gmail/SMS/contacts tools entirely. No crash fix was included in v1.4.4;
+v1.4.5 added the crash fixes on top.
+- Build: versionCode 54, versionName 1.4.4
+
+### v1.4.3 — Email NL keyword fixes (2026-02-27)
+Fixed MessageEngine and AiEngine so email queries from chat actually show emails:
+- **MessageEngine.kt** — keyword fallback `else` block was matching email queries but only
+  returning "Email monitor: active ✅" status instead of actual emails. Replaced with
+  `GmailApiClient.listUnreadSummary(ctx, 20)`. Added `GoogleAuthManager.isSignedIn(ctx)` check
+  before any Gmail API call — shows clear "Not signed in" error instead of empty result.
+  Added "how many" as an unread count trigger keyword.
+- **AiEngine.kt** — added more interpretCommand() examples for natural phrasing:
+  "any new emails", "what emails haven't I read", "could you check my emails", "check my inbox".
+  Added corresponding parseSimpleCommand() fallback patterns.
+- Build: versionCode 53, versionName 1.4.3
+
+### v1.4.2 — Google Voice improvements (2026-02-27)
+Applied GVoice parsing improvements from Termux beta version to the Android app:
+- **GmailApiClient.kt v1.2** — added group text detection (`New group text message` subject prefix).
+  Strip GVoice footer ("To respond to this text message, reply to this email...") before passing
+  body to AI — was polluting the AI context. Strip HTML tags from email body. For group texts,
+  use fromEmail as the routing identifier since phone number is not in the subject.
+- Build: versionCode 52, versionName 1.4.2
 
 ### v1.4.1 — Gmail notification-listener trigger (2026-02-27)
 REVERT of Pub/Sub approach added in v1.4.0. Replaced with on-device notification pattern.
@@ -118,49 +176,62 @@ REVERT of Pub/Sub approach added in v1.4.0. Replaced with on-device notification
 
 ### v1.4.0 — Gmail NL interface + auto-reply (2026-02-27, partially reverted)
 Gmail NL interface (KEPT), Pub/Sub trigger (REVERTED in v1.4.1).
-- **GmailApiClient.kt** — fixed post() for HTTP 204 No Content; added postRaw() for batchDelete;
-  added: getEmailMetadata(), listUnreadSummary(), countUnreadBySender(), searchEmailIds(),
-  batchMarkRead(), emptyTrash(), getOrCreateLabel(), addLabel(), getUnsubscribeLink()
-- **AiEngine.kt** — added query field to CommandResult; expanded interpretCommand() with 11
-  new Gmail actions and example JSON; updated parseSimpleCommand() with Gmail patterns
-- **MessageEngine.kt v1.3** — added appContext, channelKey() helper; guard check at top of
-  handleAdminCommand() for chat-channel confirmations; 11 Gmail action handlers:
-  gmail_count_unread, gmail_list_unread, gmail_search, gmail_trash, gmail_trash_all,
-  gmail_mark_read, gmail_mark_read_all, gmail_mark_spam, gmail_label, gmail_unsubscribe,
-  gmail_empty_trash; EMAIL channel now uses generateEmailReply()
-- **DestructiveActionGuard.kt** — updated confirmWithPassword() to extract admin code
-  word-by-word (user can say "yes delete 1984" and 1984 is extracted as the code)
-- **Message.kt** — added subject field (carries email subject for better reply generation)
+- **GmailApiClient.kt** — added: getEmailMetadata(), listUnreadSummary(), countUnreadBySender(),
+  searchEmailIds(), batchMarkRead(), emptyTrash(), getOrCreateLabel(), addLabel(), getUnsubscribeLink()
+- **AiEngine.kt** — added query field to CommandResult; 11 new Gmail actions in interpretCommand();
+  expanded parseSimpleCommand() with Gmail patterns
+- **MessageEngine.kt v1.3** — added appContext, channelKey() helper; 11 Gmail action handlers;
+  EMAIL channel now uses generateEmailReply()
+- **DestructiveActionGuard.kt** — updated confirmWithPassword() to extract admin code word-by-word
+- **Message.kt** — added subject field
 - Build: versionCode 50, versionName 1.4.0
 
 ### v1.3.8 — App icon update (2026-02-26)
 Updated launcher icon to Aigentik brand image, using mipmap launcher icons.
+- Build: versionCode ~48, versionName 1.3.8
 
-### v1.3.3 AUDIT AND FIXES (2026-02-26)
-Full codebase audit by Claude Code identified and fixed these issues:
+### v1.3.3 — Full codebase audit and fixes (2026-02-26)
+CRITICAL: Service startup gate removed, SEND_SMS permission added, ChatBridge init in service.
+HIGH: send_email command wired, Gmail notifications routed correctly.
+CLEANUP: version bump, SHA-1 corrected, constraintlayout 2.1.4, gmailAppPassword deprecated.
 
-#### CRITICAL FIXES
-1. **Service startup gate removed** — AigentikService.kt blocked startup when gmailAppPassword
-   was empty. OAuth2 users had no app password → service never initialized. Now service always
-   starts; Gmail features just disabled if not signed in. SMS/chat work independently.
-2. **SEND_SMS permission added** — SmsRouter.send() uses SmsManager.sendTextMessage() but
-   SEND_SMS was never declared in AndroidManifest.xml. Would crash at runtime. Fixed.
-3. **ChatBridge initialized in service** — ChatBridge.init(db) was only called from ChatActivity.
-   If user never opened chat before receiving a message, all notifications silently failed.
-   Now initialized in AigentikService.onCreate() before MessageEngine.
+---
 
-#### HIGH-PRIORITY FIXES
-4. **send_email command wired** — MessageEngine.kt had a TODO stub that always returned false.
-   Now calls EmailRouter.sendEmailDirect() via GmailApiClient.
-5. **Gmail notifications routed correctly** — NotificationAdapter now detects com.google.android.gm
-   and routes to EmailMonitor.onGmailNotification() instead of treating it like SMS.
+## CHATACTIVITY ARCHITECTURE (v1.0 — current)
 
-#### CLEANUP FIXES
-6. Version bumped to versionCode 43 / versionName 1.3.3
-7. strings.xml SHA-1 comment corrected to fixed keystore SHA-1
-8. constraintlayout version fixed from 1.0.1 (2017 alpha) to 2.1.4
-9. gmailAppPassword marked @Deprecated — use OAuth2 instead
-10. Settings validation updated — no longer blocks on empty gmail if OAuth signed in
+ChatActivity does NOT have its own AI pipeline. All messages route through MessageEngine.
+
+```
+User types message → sendMessage()
+    │
+    ├─ resolveLocalCommand() — fast local resolution (no service needed)
+    │     status / pause / resume / find / clear chat / help
+    │     returns String or null
+    │
+    └─ (if null) → MessageEngine.onMessageReceived(Message.Channel.CHAT)
+                         │
+                         ├─ handleAdminCommand() (CHAT is always trusted)
+                         │     AiEngine.interpretCommand() → action dispatch
+                         │     Gmail API / SMS / contacts / channel toggles
+                         │
+                         └─ notify(response)
+                               │
+                               chatNotifier → ChatBridge.post() → Room DB
+                                                                      │
+                                                              collectLatest Flow
+                                                                      │
+                                                             observeMessages() → UI re-render
+```
+
+**Key initialization in ChatActivity.onCreate():**
+1. `ChatBridge.init(db)` — so ChatBridge can post to Room
+2. `MessageEngine.chatNotifier = { ChatBridge.post(it) }` — wire response path
+3. `ContactEngine.init(applicationContext)` — needed for local status/find commands
+
+**Safety timeout:** 45-second timer in sendMessage() re-enables UI if chatNotifier never fires
+(e.g. Gmail API fails, service not running). This prevents permanent stuck state.
+
+---
 
 ## GMAIL EMAIL TRIGGER FLOW (v1.4.1 — on-device only)
 
@@ -187,67 +258,83 @@ GmailApiClient.getFullEmail(msgId) for each new ID
 Skip if: already read, or fromEmail == ownEmail (loop prevention)
         ↓
 EmailMonitor.processEmail()
-  GVoice SMS? → parse GVoiceMessage → MessageEngine.onMessageReceived()
-  Regular email → buildEmailMessage() → MessageEngine.onMessageReceived()
+  GVoice SMS? → parse GVoiceMessage → MessageEngine.onMessageReceived(EMAIL)
+  GVoice group? → New group text message subject → parse group sender → same path
+  Regular email → buildEmailMessage() → MessageEngine.onMessageReceived(EMAIL)
         ↓
 MessageEngine → AiEngine.generateEmailReply() → GmailApiClient.reply()
         ↓
 GmailApiClient.markAsRead()
 ```
 
+---
+
 ## GMAIL NL INTERFACE — SUPPORTED ACTIONS
 
-All commands require admin authentication. Destructive actions require admin code confirmation.
+All commands require admin auth (or come from chat screen, which is always trusted).
+Destructive actions require admin code confirmation before executing.
 
-| Action | Command example | Confirm required |
+| Action | Natural language examples | Confirm required |
 |---|---|---|
-| gmail_count_unread | "how many unread emails" | No |
-| gmail_list_unread | "list my emails" | No |
-| gmail_search | "find emails from amazon" | No |
+| gmail_count_unread | "how many unread emails", "any new emails" | No |
+| gmail_list_unread | "check my emails", "list unread", "check inbox" | No |
+| gmail_search | "find emails from amazon", "show emails from John" | No |
 | gmail_trash | "delete email from John" | Yes — admin code |
 | gmail_trash_all | "delete all emails from promo@co.com" | Yes — admin code |
-| gmail_mark_read | "mark email as read" | No |
+| gmail_mark_read | "mark emails from google as read" | No |
 | gmail_mark_read_all | "mark all emails as read" | No |
-| gmail_mark_spam | "mark as spam" | Yes — admin code |
-| gmail_label | "label email as Work" | No |
+| gmail_mark_spam | "mark that amazon email as spam" | Yes — admin code |
+| gmail_label | "label amazon emails as shopping" | No |
 | gmail_unsubscribe | "unsubscribe from newsletter" | Yes — admin code |
-| gmail_empty_trash | "empty trash" | Yes — double confirm |
+| gmail_empty_trash | "empty trash" | Yes — admin code (permanent!) |
 
-Confirmation UX: Aigentik says "Reply with your admin code to confirm (e.g. 'yes delete [code]')".
-User replies naturally ("yes delete 1984") — code is extracted word-by-word.
+Confirmation UX: "Reply with your admin code to confirm (e.g. 'yes delete [code]')".
+User replies naturally ("yes delete 1984") — code extracted word-by-word by DestructiveActionGuard.
 
-## GOOGLE SIGN-IN STATUS
+---
+
+## GOOGLE SIGN-IN CONFIG
+
 Fixed keystore SHA-1 resolves ApiException code 10.
 
-### Root cause chain (for reference):
+### Root cause chain:
 1. GitHub Actions generates a NEW random debug keystore every build
 2. Each build has different SHA-1 → never matches what's registered in Google Cloud
 3. Fixed by storing base64-encoded keystore in GitHub secret DEBUG_KEYSTORE_BASE64
 4. build.yml decodes and installs it before every build
 
 ### Config:
-- Fixed keystore SHA-1: E6:76:61:28:5F:6C:27:9D:14:34:C5:66:2C:1E:17:4E:32:67:9D:80
-- certificate_hash: e67661285f6c279d1434c5662c1e174e32679d80
-- Android OAuth client: 630924077353-gmv67c8n0lad1q5u9q6v8t41sf79l8uv.apps.googleusercontent.com
-- Web OAuth client: 630924077353-oopagdmapkve24ehb6pjppeph2bf292c.apps.googleusercontent.com
+- Fixed keystore SHA-1: `E6:76:61:28:5F:6C:27:9D:14:34:C5:66:2C:1E:17:4E:32:67:9D:80`
+- certificate_hash: `e67661285f6c279d1434c5662c1e174e32679d80`
+- Android OAuth client: `630924077353-gmv67c8n0lad1q5u9q6v8t41sf79l8uv.apps.googleusercontent.com`
+- Web OAuth client: `630924077353-oopagdmapkve24ehb6pjppeph2bf292c.apps.googleusercontent.com`
+
+---
 
 ## GOOGLE CLOUD / FIREBASE CONFIG
-- Project ID: aigentik-android
-- Project Number: 630924077353
-- Firebase app ID: 1:630924077353:android:5c58e1d30f7983771f2f38
-- API Key: AIzaSyAXRjCb1kN40hf43z359ZcFEAz4Sdw8arA
-- OAuth consent screen: External, Testing mode
-- Test user: ismail.t.abdullah@gmail.com
-- APIs enabled: Gmail API, People API, Identity Toolkit API
-- Pub/Sub API: NOT needed — removed from architecture
 
-## GMAIL OAUTH SCOPES REQUESTED
-- https://www.googleapis.com/auth/gmail.modify  (trash, labels, spam, batchModify)
-- https://www.googleapis.com/auth/gmail.send    (compose and send)
-- https://www.googleapis.com/auth/contacts.readonly
+- Project ID: `aigentik-android`
+- Project Number: `630924077353`
+- Firebase app ID: `1:630924077353:android:5c58e1d30f7983771f2f38`
+- API Key: `AIzaSyAXRjCb1kN40hf43z359ZcFEAz4Sdw8arA`
+- OAuth consent screen: External, Testing mode
+- Test user: `ismail.t.abdullah@gmail.com`
+- APIs enabled: Gmail API, People API, Identity Toolkit API
+- **Pub/Sub API: NOT needed — removed from architecture, do not re-enable**
+
+---
+
+## GMAIL OAUTH SCOPES
+
+- `https://www.googleapis.com/auth/gmail.modify` — read, trash, label, spam, batchModify
+- `https://www.googleapis.com/auth/gmail.send` — compose and send
+- NOTE: `contacts.readonly` was in earlier scope lists but People API not actively used
 - NOTE: pubsub scope was added in v1.4.0 and removed in v1.4.1 — do not add it back
 
+---
+
 ## BUILD SYSTEM
+
 - Gradle 8.9, AGP 8.7.3, Kotlin 2.0.21, Java 17
 - NDK r27b (27.2.12479018), CMake 3.22.1
 - llama.cpp cloned at build time (cached), compiled via CMake for arm64-v8a
@@ -256,7 +343,10 @@ Fixed keystore SHA-1 resolves ApiException code 10.
 - JavaMail 1.6.2 kept for MIME message building in GmailApiClient (send via REST)
 - ConstraintLayout 2.1.4, OkHttp 4.12.0, Gson 2.10.1, Room 2.6.1
 
+---
+
 ## TERMUX LIMITATIONS
+
 - No sudo, no apt install of system packages without pkg
 - Python available, pip needs --break-system-packages flag
 - Pillow installed for icon generation
@@ -264,20 +354,57 @@ Fixed keystore SHA-1 resolves ApiException code 10.
 - Cannot run Gradle locally (no memory/CPU for it on phone)
 - All file paths use /data/data/com.termux/files/home/ not /root/ or /home/
 - Internal storage accessible at /sdcard/ or /storage/emulated/0/
-- Bash tool (Claude Code) fails with EACCES on /tmp — provide all commands for user to run manually
+- **Bash tool (Claude Code) fails with EACCES on /tmp — provide all commands for user to run manually in Termux**
 
-## TESTING PLAN (v1.4.1)
-1. Google Sign-In — should work with fixed keystore (test ApiException code)
-2. Gmail auto-reply: send email to account → Gmail notification appears → Aigentik replies
-3. Gmail NL: type "how many unread emails" in chat → should return count + sender breakdown
-4. Gmail NL: type "delete email from [sender]" → confirm prompt → reply with admin code
-5. Gmail NL: type "empty trash" → double confirm → permanent deletion
-6. GVoice SMS forwarding detection and reply routing via email thread
-7. SMS sending (SEND_SMS permission was added in v1.3.3)
-8. ChatBridge notifications appearing in chat history without opening chat first
-9. historyId advances correctly — check logs after second email notification
+---
+
+## TESTING PLAN (v1.4.5)
+
+### Chat functionality (previously broken — now fixed in v1.4.4 + v1.4.5)
+1. Open Chat — should not crash on send
+2. Type `status` → should show agent state, contact count, AI state without crash
+3. Type `find [contact name]` → should look up contact
+4. Type `help` → should show command list instantly
+5. Type `check emails` → if signed in: shows unread list. If not: "Not signed in to Google" message
+6. Type `how many unread emails` → count by sender
+7. Type `text Mom I'll be late` → sends SMS
+8. Type any general message (e.g. "hello") → AI reply if model loaded, fallback hint if not
+
+### Gmail trigger (notification-driven)
+9. Send email to account → Gmail notification appears → Aigentik fetches and replies
+10. Second email: historyId should advance, only new message fetched (check logcat)
+11. Google Voice SMS → forward to Gmail → Aigentik detects GVoice subject → replies via thread
+12. GVoice group text → `New group text message` subject → parsed correctly
+
+### Auth
+13. Settings → Sign in with Google → should succeed (fixed keystore, correct SHA-1)
+14. Remote admin: send SMS with `Admin: Ish\nPassword: [pw]\ncheck emails` format
+
+### Destructive actions (require admin code)
+15. "delete email from [sender]" → confirm prompt → reply "yes delete [code]" → trashed
+16. "empty trash" → confirm prompt → reply "yes empty [code]" → permanently deleted
+
+---
+
+## KNOWN ISSUES / NEXT TASKS
+
+1. **Google Sign-In** — needs end-to-end test with v1.4.5 APK to confirm ApiException code 10 is gone
+2. **chatNotifier race** — if AigentikService starts after ChatActivity sets chatNotifier,
+   service overwrites with the same lambda. This is fine but worth monitoring if behavior diverges.
+3. **ContactEngine double-init** — ContactEngine.init() called from both AigentikService and
+   ChatActivity. Second call re-syncs Android contacts, which is harmless but slightly wasteful.
+   Low priority.
+4. **MessageEngine.appContext null if service never ran** — Gmail ops show "not initialized" in chat
+   if AigentikService hasn't started yet. Could add MessageEngine.initContext(ctx) for ChatActivity
+   to call, so Gmail works in chat even before first service start.
+5. **Per-contact instruction setting via chat** — "always reply formally to John" not yet wired
+   as a natural language command (ContactEngine.setInstructions exists, just not hooked up in NL)
+6. **Multi-model hot-swap** — only one model can be loaded at a time
+
+---
 
 ## DEVELOPER PREFERENCES
+
 - Production-ready code only
 - Always ask clarifying questions before writing code
 - Explain what you will do and get approval before making changes
