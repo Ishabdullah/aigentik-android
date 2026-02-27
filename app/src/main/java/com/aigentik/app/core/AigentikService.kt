@@ -16,6 +16,7 @@ import com.aigentik.app.chat.ChatDatabase
 import com.aigentik.app.core.ChatBridge
 import com.aigentik.app.email.EmailMonitor
 import com.aigentik.app.email.EmailRouter
+import com.aigentik.app.email.GmailPushManager
 import com.aigentik.app.sms.SmsRouter
 import com.aigentik.app.system.ConnectionWatchdog
 import kotlinx.coroutines.CoroutineScope
@@ -23,7 +24,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-// AigentikService v1.2
+// AigentikService v1.4
+// v1.4: Gmail push notifications via Pub/Sub Watch — near-real-time email trigger
+//   GmailPushManager.setup() registers Gmail Watch + Pub/Sub topic/subscription
+//   EmailMonitor.startPushPolling() polls every 30s for new Pub/Sub messages
+//   Falls back to NotificationAdapter listener if Pub/Sub setup fails
+// v1.3: applicationContext passed to MessageEngine for Gmail API actions
 // v1.2: PARTIAL_WAKE_LOCK passed to MessageEngine to prevent Samsung CPU throttling
 //   during llama.cpp inference. Without it, background inference takes 5+ minutes
 //   instead of ~30 seconds. WakeLock is acquired per-message and auto-released.
@@ -95,16 +101,33 @@ class AigentikService : Service() {
                     Log.w(TAG, "No model — fallback mode")
                 }
 
-                // Gmail — OAuth2, notification-driven
+                // Gmail — OAuth2, push notifications via Pub/Sub + notification fallback
                 // NOTE: applicationContext captured outside coroutine scope
                 // 'this' inside launch{} refers to CoroutineScope, not Service
                 val appCtx = applicationContext
                 EmailMonitor.init(appCtx)
                 EmailRouter.init(appCtx)
-                Log.i(TAG, "Email services initialized — waiting for Gmail notifications")
 
-                // MessageEngine — pass wakeLock so inference keeps CPU running in background
+                // Set up Gmail Watch + Pub/Sub for near-real-time push notifications
+                // Runs in a separate coroutine so a slow setup doesn't block service start
+                // On failure, NotificationAdapter listener continues as fallback
+                scope.launch {
+                    val pushOk = GmailPushManager.setup(appCtx)
+                    if (pushOk) {
+                        Log.i(TAG, "Gmail push notifications active (Pub/Sub Watch)")
+                        updateNotification("📬 Gmail push active")
+                    } else {
+                        Log.w(TAG, "Gmail push setup failed — notification-listener fallback only")
+                    }
+                }
+
+                // Start 30-second Pub/Sub polling loop inside this foreground service
+                EmailMonitor.startPushPolling(appCtx)
+                Log.i(TAG, "Email push polling started — ${appCtx.packageName}")
+
+                // MessageEngine — context for Gmail API, wakeLock for background inference
                 MessageEngine.configure(
+                    context      = appCtx,
                     adminNumber  = adminNumber,
                     ownerName    = ownerName,
                     agentName    = agentName,
@@ -163,6 +186,7 @@ class AigentikService : Service() {
     override fun onBind(p: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        EmailMonitor.stopPushPolling()
         EmailMonitor.stop()
         ConnectionWatchdog.stop()
         super.onDestroy()

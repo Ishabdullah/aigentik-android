@@ -13,12 +13,13 @@ import com.google.android.gms.common.api.Scope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-// GoogleAuthManager v1.5
+// GoogleAuthManager v1.6
 // — Fixed keystore SHA-1: e67661285f6c279d1434c5662c1e174e32679d80
 // — Uses Web client ID for requestIdToken (required for OAuth flow)
 // — Sign-in scopes: contacts.readonly only (sensitive — safe for unverified apps)
 // — ALL Gmail scopes are RESTRICTED and cause code 10 on unverified apps
-// — Gmail scopes requested incrementally via GoogleAuthUtil.getToken() after sign-in
+// — Gmail + Pub/Sub scopes requested incrementally via GoogleAuthUtil.getToken() after sign-in
+// v1.6: added gmail.modify (required for trash/label/spam ops) and pubsub (push notifications)
 object GoogleAuthManager {
 
     private const val TAG = "GoogleAuthManager"
@@ -30,11 +31,17 @@ object GoogleAuthManager {
         "https://www.googleapis.com/auth/contacts.readonly"
     )
 
-    // Gmail scopes — all restricted, requested incrementally via GoogleAuthUtil.getToken()
-    // after sign-in succeeds. This bypasses the sign-in scope check.
+    // Restricted scopes — requested incrementally via GoogleAuthUtil.getToken() after sign-in
+    // This bypasses the sign-in scope restriction for unverified apps
+    // User will see a consent prompt on first token request for each new scope
+    //
+    // gmail.modify — read, trash, label, mark spam, batchModify (superset of gmail.readonly)
+    // gmail.send   — compose and send emails
+    // pubsub       — create Pub/Sub topics/subscriptions for Gmail Watch push notifications
     val GMAIL_SCOPES = listOf(
-        "https://www.googleapis.com/auth/gmail.readonly",
-        "https://www.googleapis.com/auth/gmail.send"
+        "https://www.googleapis.com/auth/gmail.modify",
+        "https://www.googleapis.com/auth/gmail.send",
+        "https://www.googleapis.com/auth/pubsub"
     )
 
     private var signedInAccount: GoogleSignInAccount? = null

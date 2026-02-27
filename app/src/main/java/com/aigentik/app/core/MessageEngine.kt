@@ -1,5 +1,6 @@
 package com.aigentik.app.core
 
+import android.content.Context
 import android.util.Log
 import com.aigentik.app.ai.AiEngine
 import com.aigentik.app.auth.AdminAuthManager
@@ -7,13 +8,17 @@ import com.aigentik.app.auth.DestructiveActionGuard
 import com.aigentik.app.core.PhoneNormalizer
 import com.aigentik.app.email.EmailMonitor
 import com.aigentik.app.email.EmailRouter
+import com.aigentik.app.email.GmailApiClient
 import com.aigentik.app.sms.SmsRouter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-// MessageEngine v1.2
+// MessageEngine v1.3
+// v1.3: Gmail natural language actions — count, list, search, trash, mark read,
+//   mark spam, label, unsubscribe, empty trash. All destructive actions gated
+//   by DestructiveActionGuard requiring admin code confirmation.
 // v1.2: PARTIAL_WAKE_LOCK acquired around each message handler to prevent
 //   Samsung CPU throttling during llama.cpp inference. Max 10-min timeout.
 // v1.1: Channel toggles, send_email wired, check_email, keyword fallback
@@ -27,17 +32,20 @@ object MessageEngine {
     private var agentName    = "Aigentik"
     private var ownerNotifier: ((String) -> Unit)? = null
     private var wakeLock: android.os.PowerManager.WakeLock? = null
+    private var appContext: Context? = null
 
     // chatNotifier posts messages into Room DB so they appear in chat history
     var chatNotifier: ((String) -> Unit)? = null
 
     fun configure(
+        context: Context,
         adminNumber: String,
         ownerName: String,
         agentName: String,
         ownerNotifier: (String) -> Unit,
         wakeLock: android.os.PowerManager.WakeLock? = null
     ) {
+        this.appContext    = context.applicationContext
         this.adminNumber   = PhoneNormalizer.toE164(adminNumber)
         this.ownerName     = ownerName
         this.agentName     = agentName
@@ -46,6 +54,11 @@ object MessageEngine {
         AiEngine.configure(agentName, ownerName)
         Log.i(TAG, "$agentName MessageEngine configured")
     }
+
+    // Stable channel key for destructive action guard:
+    // Chat screen always uses "CHAT"; remote channels use sender identifier
+    private fun channelKey(message: Message): String =
+        if (message.channel == Message.Channel.CHAT) "CHAT" else message.sender
 
     private fun notify(message: String) {
         ownerNotifier?.invoke(message)
@@ -137,6 +150,17 @@ object MessageEngine {
 
     private suspend fun handleAdminCommand(message: Message) {
         Log.i(TAG, "Admin command: ${message.body}")
+
+        // Check for pending destructive action confirmation — applies to all channels
+        // including chat (where the onMessageReceived guard block is skipped)
+        val ck = channelKey(message)
+        if (DestructiveActionGuard.hasPending(ck)) {
+            val result = DestructiveActionGuard.confirmWithPassword(ck, message.body.trim())
+            notify(result)
+            replyToSender(message, result)
+            return
+        }
+
         val input = message.body.trim()
         val lower = input.lowercase()
 
@@ -274,20 +298,270 @@ object MessageEngine {
                 "check_email", "read_email", "list_email" -> {
                     val running = EmailMonitor.isRunning()
                     val status = if (running) "active ✅" else "stopped ❌"
-                    val connected = if (EmailMonitor.isRunning()) "connected" else "disconnected"
-                    notify("📧 Email monitor: $status\nGmail: $connected\nNew emails appear here automatically.\nChannels:\n${ChannelManager.statusSummary()}")
+                    notify("📧 Email monitor: $status\nGmail: ${if (running) "connected" else "disconnected"}\nNew emails appear here automatically.\nChannels:\n${ChannelManager.statusSummary()}")
                 }
 
                 "sync_contacts" -> {
                     notify("✅ Contacts: ${ContactEngine.getCount()} loaded")
                 }
 
+                // --- Gmail natural language actions ---
+
+                "gmail_count_unread" -> {
+                    val ctx = appContext ?: run { notify("❌ Gmail not initialized — restart app"); return }
+                    notify("📊 Counting unread emails...")
+                    val breakdown = GmailApiClient.countUnreadBySender(ctx)
+                    if (breakdown.isEmpty()) {
+                        notify("✅ No unread emails in inbox!")
+                    } else {
+                        val total = breakdown.values.sum()
+                        val top = breakdown.entries
+                            .sortedByDescending { it.value }
+                            .take(15)
+                            .joinToString("\n") { "  • ${it.key}: ${it.value}" }
+                        notify("📬 Unread: $total total\n\nTop senders:\n$top")
+                    }
+                }
+
+                "gmail_list_unread" -> {
+                    val ctx = appContext ?: run { notify("❌ Gmail not initialized — restart app"); return }
+                    notify("📧 Fetching unread emails...")
+                    val emails = GmailApiClient.listUnreadSummary(ctx, 20)
+                    if (emails.isEmpty()) {
+                        notify("✅ No unread emails!")
+                    } else {
+                        val list = emails.mapIndexed { i, e ->
+                            "${i + 1}. ${e.fromName.ifEmpty { e.fromEmail }.take(25)}\n   ${e.subject.take(55)}"
+                        }.joinToString("\n")
+                        notify("📬 ${emails.size} unread:\n\n$list")
+                    }
+                }
+
+                "gmail_search" -> {
+                    val target = result.target ?: run { notify("What should I search for?"); return }
+                    val ctx = appContext ?: run { notify("❌ Gmail not initialized — restart app"); return }
+                    val gmailQuery = result.query
+                        ?: if (target.contains("@")) "from:$target" else "from:$target OR subject:$target"
+                    notify("🔍 Searching: $gmailQuery")
+                    val emails = GmailApiClient.searchEmails(ctx, gmailQuery, 10)
+                    if (emails.isEmpty()) {
+                        notify("No emails found for \"$target\"")
+                    } else {
+                        val list = emails.mapIndexed { i, e ->
+                            "${i + 1}. ${e.fromName.ifEmpty { e.fromEmail }}\n   ${e.subject.take(60)}\n   ${e.date.take(16)}"
+                        }.joinToString("\n\n")
+                        notify("📧 ${emails.size} result(s) for \"$target\":\n\n$list")
+                    }
+                }
+
+                "gmail_trash" -> {
+                    val target = result.target ?: run { notify("Which email should I move to trash?"); return }
+                    val ctx = appContext ?: run { notify("❌ Gmail not initialized — restart app"); return }
+                    val gmailQuery = result.query ?: "from:$target"
+                    val emails = GmailApiClient.searchEmails(ctx, gmailQuery, 3)
+                    if (emails.isEmpty()) {
+                        notify("No emails found matching \"$target\"")
+                        return
+                    }
+                    val preview = emails.first()
+                    val sender = preview.fromName.ifEmpty { preview.fromEmail }
+                    val summary = "\"${preview.subject.take(70)}\" from $sender"
+                    DestructiveActionGuard.storePending(ck, "Move to trash: $summary") {
+                        val ok = GmailApiClient.deleteEmail(ctx, preview.gmailId)
+                        if (ok) "🗑 Moved to trash:\n$summary"
+                        else "❌ Failed to trash email. Check Google sign-in."
+                    }
+                    val prompt = "⚠️ Move to trash:\n$summary\n\nReply with your admin code to confirm (e.g. \"yes delete [code]\"), or anything else to cancel."
+                    notify(prompt)
+                    replyToSender(message, prompt)
+                }
+
+                "gmail_trash_all" -> {
+                    val target = result.target ?: run { notify("Which sender's emails should I delete?"); return }
+                    val ctx = appContext ?: run { notify("❌ Gmail not initialized — restart app"); return }
+                    val gmailQuery = result.query ?: "from:$target"
+                    notify("🔍 Searching emails from $target...")
+                    val emails = GmailApiClient.searchEmails(ctx, gmailQuery, 10)
+                    if (emails.isEmpty()) {
+                        notify("No emails found from \"$target\"")
+                        return
+                    }
+                    val senderDisplay = emails.first().fromName.ifEmpty { emails.first().fromEmail }
+                    val firstSubject = emails.first().subject.take(50)
+                    DestructiveActionGuard.storePending(ck, "Move ALL emails from $senderDisplay to trash") {
+                        val count = GmailApiClient.deleteAllMatching(ctx, gmailQuery)
+                        "🗑 Moved $count email(s) from $senderDisplay to trash."
+                    }
+                    val prompt = "⚠️ Move to trash: ALL emails from $senderDisplay\n(e.g. \"$firstSubject\" and ${emails.size - 1} more found so far)\n\nReply with your admin code to confirm (e.g. \"yes delete [code]\"), or anything else to cancel."
+                    notify(prompt)
+                    replyToSender(message, prompt)
+                }
+
+                "gmail_mark_read" -> {
+                    val target = result.target ?: run { notify("Which emails should I mark as read?"); return }
+                    val ctx = appContext ?: run { notify("❌ Gmail not initialized — restart app"); return }
+                    val gmailQuery = result.query ?: "from:$target is:unread"
+                    val emails = GmailApiClient.searchEmails(ctx, gmailQuery, 50)
+                    if (emails.isEmpty()) {
+                        notify("No unread emails found from \"$target\"")
+                        return
+                    }
+                    val ids = emails.map { it.gmailId }
+                    val ok = GmailApiClient.batchMarkRead(ctx, ids)
+                    val senderDisplay = emails.first().fromName.ifEmpty { emails.first().fromEmail }
+                    notify(if (ok) "✅ Marked ${emails.size} email(s) as read from $senderDisplay"
+                           else "❌ Failed to mark emails as read. Check Google sign-in.")
+                }
+
+                "gmail_mark_read_all" -> {
+                    val ctx = appContext ?: run { notify("❌ Gmail not initialized — restart app"); return }
+                    notify("📬 Fetching unread emails...")
+                    val gmailQuery = result.query ?: "is:unread in:inbox"
+                    val emails = GmailApiClient.searchEmails(ctx, gmailQuery, 100)
+                    if (emails.isEmpty()) {
+                        notify("✅ No unread emails!")
+                        return
+                    }
+                    val ids = emails.map { it.gmailId }
+                    val ok = GmailApiClient.batchMarkRead(ctx, ids)
+                    notify(if (ok) "✅ Marked ${emails.size} email(s) as read"
+                           else "❌ Failed to mark emails as read. Check Google sign-in.")
+                }
+
+                "gmail_mark_spam" -> {
+                    val target = result.target ?: run { notify("Which email should I mark as spam?"); return }
+                    val ctx = appContext ?: run { notify("❌ Gmail not initialized — restart app"); return }
+                    val gmailQuery = result.query ?: "from:$target"
+                    val emails = GmailApiClient.searchEmails(ctx, gmailQuery, 3)
+                    if (emails.isEmpty()) {
+                        notify("No emails found matching \"$target\"")
+                        return
+                    }
+                    val preview = emails.first()
+                    val sender = preview.fromName.ifEmpty { preview.fromEmail }
+                    val summary = "\"${preview.subject.take(70)}\" from $sender"
+                    DestructiveActionGuard.storePending(ck, "Mark as spam: $summary") {
+                        val ok = GmailApiClient.markAsSpam(ctx, preview.gmailId)
+                        if (ok) "🚫 Marked as spam:\n$summary"
+                        else "❌ Failed to mark as spam. Check Google sign-in."
+                    }
+                    val prompt = "⚠️ Mark as spam:\n$summary\n\nReply with your admin code to confirm (e.g. \"yes spam [code]\"), or anything else to cancel."
+                    notify(prompt)
+                    replyToSender(message, prompt)
+                }
+
+                "gmail_label" -> {
+                    val target = result.target ?: run { notify("Which emails should I label?"); return }
+                    val labelName = result.content ?: run { notify("What label should I add?"); return }
+                    val ctx = appContext ?: run { notify("❌ Gmail not initialized — restart app"); return }
+                    val gmailQuery = result.query ?: "from:$target"
+                    notify("🏷 Finding emails from $target...")
+                    val emails = GmailApiClient.searchEmails(ctx, gmailQuery, 20)
+                    if (emails.isEmpty()) {
+                        notify("No emails found from \"$target\"")
+                        return
+                    }
+                    val labelId = GmailApiClient.getOrCreateLabel(ctx, labelName)
+                    if (labelId == null) {
+                        notify("❌ Failed to create label \"$labelName\". Check Google sign-in.")
+                        return
+                    }
+                    var labeled = 0
+                    emails.forEach { e -> if (GmailApiClient.addLabel(ctx, e.gmailId, labelId)) labeled++ }
+                    val senderDisplay = emails.first().fromName.ifEmpty { emails.first().fromEmail }
+                    notify("🏷 Labeled $labeled email(s) from $senderDisplay as \"$labelName\"")
+                }
+
+                "gmail_unsubscribe" -> {
+                    val target = result.target ?: run { notify("Who should I unsubscribe from?"); return }
+                    val ctx = appContext ?: run { notify("❌ Gmail not initialized — restart app"); return }
+                    val gmailQuery = result.query ?: "from:$target"
+                    notify("🔍 Finding emails from $target...")
+                    val emails = GmailApiClient.searchEmails(ctx, gmailQuery, 5)
+                    if (emails.isEmpty()) {
+                        notify("No emails found from \"$target\". Can't unsubscribe.")
+                        return
+                    }
+                    val senderDisplay = emails.first().fromName.ifEmpty { emails.first().fromEmail }
+                    // Look for unsubscribe link in recent emails
+                    var unsubLink: String? = null
+                    for (e in emails) {
+                        val link = GmailApiClient.getUnsubscribeLink(ctx, e.gmailId)
+                        if (link != null) { unsubLink = link; break }
+                    }
+                    DestructiveActionGuard.storePending(ck,
+                        "Unsubscribe from $senderDisplay and move all their emails to trash") {
+                        val count = GmailApiClient.deleteAllMatching(ctx, gmailQuery)
+                        buildString {
+                            if (unsubLink != null) append("🔗 Unsubscribe link (open in browser to complete):\n$unsubLink\n\n")
+                            else append("ℹ️ No unsubscribe link found in recent emails.\n\n")
+                            append("🗑 Moved $count email(s) from $senderDisplay to trash.")
+                        }
+                    }
+                    val prompt = buildString {
+                        append("⚠️ Unsubscribe from $senderDisplay?\n")
+                        if (unsubLink != null) append("• Unsubscribe link found ✅\n")
+                        else append("• No unsubscribe link found (will trash emails only)\n")
+                        append("• Move ${emails.size}+ emails to trash\n\n")
+                        append("Reply with your admin code to confirm (e.g. \"yes unsubscribe [code]\"), or anything else to cancel.")
+                    }
+                    notify(prompt)
+                    replyToSender(message, prompt)
+                }
+
+                "gmail_empty_trash" -> {
+                    val ctx = appContext ?: run { notify("❌ Gmail not initialized — restart app"); return }
+                    DestructiveActionGuard.storePending(ck,
+                        "PERMANENTLY DELETE all emails in Trash — cannot be undone!") {
+                        val count = GmailApiClient.emptyTrash(ctx)
+                        "🗑 Permanently deleted $count email(s) from trash."
+                    }
+                    val prompt = "⚠️ PERMANENTLY DELETE all emails in Trash?\n\n🚨 This CANNOT be undone — emails will be gone forever!\n\nReply with your admin code to confirm (e.g. \"yes empty [code]\"), or anything else to cancel."
+                    notify(prompt)
+                    replyToSender(message, prompt)
+                }
+
                 else -> {
                     // Keyword fallback before general AI chat
                     val lower2 = input.lowercase()
                     when {
+                        // Gmail keyword shortcuts — run when AI model is offline or returns unknown
+                        lower2.contains("unread") && lower2.contains("email") -> {
+                            val ctx = appContext
+                            if (ctx != null) {
+                                val breakdown = GmailApiClient.countUnreadBySender(ctx)
+                                if (breakdown.isEmpty()) {
+                                    notify("✅ No unread emails!")
+                                } else {
+                                    val total = breakdown.values.sum()
+                                    val top = breakdown.entries
+                                        .sortedByDescending { it.value }
+                                        .take(15)
+                                        .joinToString("\n") { "  • ${it.key}: ${it.value}" }
+                                    notify("📬 Unread: $total total\n\nTop senders:\n$top")
+                                }
+                            } else {
+                                notify("📧 Gmail not initialized. Try restarting the app.")
+                            }
+                        }
+
+                        lower2.contains("empty") && lower2.contains("trash") -> {
+                            val ctx = appContext
+                            if (ctx != null) {
+                                DestructiveActionGuard.storePending(ck,
+                                    "PERMANENTLY DELETE all emails in Trash — cannot be undone!") {
+                                    val count = GmailApiClient.emptyTrash(ctx)
+                                    "🗑 Permanently deleted $count email(s) from trash."
+                                }
+                                val prompt = "⚠️ PERMANENTLY DELETE all emails in Trash?\n\n🚨 This CANNOT be undone!\n\nReply with your admin code to confirm (e.g. \"yes empty [code]\"), or anything else to cancel."
+                                notify(prompt)
+                                replyToSender(message, prompt)
+                            }
+                        }
+
                         lower2.contains("email") && (lower2.contains("check") ||
-                            lower2.contains("read") || lower2.contains("inbox")) -> {
+                            lower2.contains("read") || lower2.contains("inbox") ||
+                            lower2.contains("status")) -> {
                             val running = EmailMonitor.isRunning()
                             val st = if (running) "active ✅" else "stopped ❌"
                             notify("📧 Email monitor: $st\nNew emails appear here automatically.\n${ChannelManager.statusSummary()}")
@@ -388,25 +662,37 @@ object MessageEngine {
             }
 
             if (shouldAutoReply) {
-                val reply = AiEngine.generateSmsReply(
-                    message.senderName ?: contact.name,
-                    message.sender,
-                    message.body,
-                    contact.relationship,
-                    contact.instructions
-                )
+                // Use email-appropriate reply for EMAIL channel (longer, more professional)
+                // SMS/NOTIFICATION get the concise SMS generator
+                val reply = if (message.channel == Message.Channel.EMAIL) {
+                    AiEngine.generateEmailReply(
+                        fromName     = message.senderName,
+                        fromEmail    = message.sender,
+                        subject      = message.subject ?: "Email",
+                        body         = message.body,
+                        relationship = contact.relationship,
+                        instructions = contact.instructions
+                    )
+                } else {
+                    AiEngine.generateSmsReply(
+                        senderName   = message.senderName ?: contact.name,
+                        senderPhone  = message.sender,
+                        message      = message.body,
+                        relationship = contact.relationship,
+                        instructions = contact.instructions
+                    )
+                }
 
                 // Route by channel
                 // NOTIFICATION = RCS/SMS via inline reply (no SEND_SMS needed)
                 // SMS = direct SmsManager (admin-initiated or fallback)
-                // EMAIL = Gmail SMTP / GVoice email thread
+                // EMAIL = Gmail REST API reply in thread
                 when (message.channel) {
                     Message.Channel.NOTIFICATION -> {
                         val sent = com.aigentik.app.adapters.NotificationReplyRouter.sendReply(
                             message.id, reply
                         )
                         if (!sent) {
-                            // Fallback to SmsRouter if inline reply unavailable
                             Log.w(TAG, "Inline reply failed — falling back to SmsRouter")
                             SmsRouter.send(message.sender, reply)
                         }
@@ -419,7 +705,8 @@ object MessageEngine {
                 val sender = contact.name ?: message.sender
                 val inbound = message.body.take(60)
                 val outbound = reply.take(80)
-                notify("💬 Auto-replied to $sender:\nThey said: \"$inbound\"\nSent: \"$outbound\"")
+                val channelLabel = if (message.channel == Message.Channel.EMAIL) "📧" else "💬"
+                notify("$channelLabel Auto-replied to $sender:\nThey said: \"$inbound\"\nSent: \"$outbound\"")
             } else {
                 val sender = contact.name ?: message.sender
                 val preview = message.body.take(100)
