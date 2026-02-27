@@ -159,7 +159,11 @@ object AiEngine {
                 "check_email, list_contacts, sync_contacts, status, unknown. " +
                 "Examples: " +
                 "\"how many unread emails\" -> {\"action\":\"gmail_count_unread\",\"target\":null,\"content\":null,\"query\":null} " +
+                "\"any new emails\" -> {\"action\":\"gmail_count_unread\",\"target\":null,\"content\":null,\"query\":null} " +
                 "\"list my unread emails\" -> {\"action\":\"gmail_list_unread\",\"target\":null,\"content\":null,\"query\":null} " +
+                "\"what emails haven't I read\" -> {\"action\":\"gmail_list_unread\",\"target\":null,\"content\":null,\"query\":null} " +
+                "\"could you check my emails\" -> {\"action\":\"gmail_list_unread\",\"target\":null,\"content\":null,\"query\":null} " +
+                "\"check my inbox\" -> {\"action\":\"gmail_list_unread\",\"target\":null,\"content\":null,\"query\":null} " +
                 "\"show emails from amazon\" -> {\"action\":\"gmail_search\",\"target\":\"amazon\",\"content\":null,\"query\":\"from:amazon\"} " +
                 "\"delete that email from john\" -> {\"action\":\"gmail_trash\",\"target\":\"john\",\"content\":null,\"query\":\"from:john\"} " +
                 "\"delete all emails from newsletters\" -> {\"action\":\"gmail_trash_all\",\"target\":\"newsletters\",\"content\":null,\"query\":\"from:newsletters\"} " +
@@ -202,10 +206,21 @@ object AiEngine {
                 CommandResult("gmail_empty_trash", null, null, false)
             lower.contains("unread") && lower.contains("email") ->
                 CommandResult("gmail_count_unread", null, null, false)
+            lower.contains("how many") && lower.contains("email") ->
+                CommandResult("gmail_count_unread", null, null, false)
             (lower.contains("list") || lower.contains("show")) &&
                 (lower.contains("inbox") || lower.contains("email") || lower.contains("unread")) &&
                 !lower.contains("from") ->
                 CommandResult("gmail_list_unread", null, null, false)
+            // Natural language email reading queries — phrased as questions not commands
+            lower.contains("email") && (lower.contains("haven't") || lower.contains("not read")) ->
+                CommandResult("gmail_list_unread", null, null, false)
+            lower.contains("inbox") && !lower.contains("spam") ->
+                CommandResult("gmail_list_unread", null, null, false)
+            lower.contains("check") && lower.contains("email") ->
+                CommandResult("gmail_list_unread", null, null, false)
+            lower.contains("new") && lower.contains("email") ->
+                CommandResult("gmail_count_unread", null, null, false)
             lower.startsWith("unsubscribe from ") -> {
                 val sender = lower.removePrefix("unsubscribe from ").trim()
                 CommandResult("gmail_unsubscribe", sender, null, false,

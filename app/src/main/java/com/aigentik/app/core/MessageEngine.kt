@@ -5,6 +5,7 @@ import android.util.Log
 import com.aigentik.app.ai.AiEngine
 import com.aigentik.app.auth.AdminAuthManager
 import com.aigentik.app.auth.DestructiveActionGuard
+import com.aigentik.app.auth.GoogleAuthManager
 import com.aigentik.app.core.PhoneNormalizer
 import com.aigentik.app.email.EmailMonitor
 import com.aigentik.app.email.EmailRouter
@@ -526,9 +527,14 @@ object MessageEngine {
                     val lower2 = input.lowercase()
                     when {
                         // Gmail keyword shortcuts — run when AI model is offline or returns unknown
-                        lower2.contains("unread") && lower2.contains("email") -> {
+                        lower2.contains("email") && !lower2.contains("mark") &&
+                            (lower2.contains("unread") || lower2.contains("how many")) -> {
                             val ctx = appContext
-                            if (ctx != null) {
+                            if (ctx == null) {
+                                notify("📧 Gmail not initialized — restart app")
+                            } else if (!GoogleAuthManager.isSignedIn(ctx)) {
+                                notify("📧 Not signed in to Google — tap Settings → Sign in with Google to use email features.")
+                            } else {
                                 val breakdown = GmailApiClient.countUnreadBySender(ctx)
                                 if (breakdown.isEmpty()) {
                                     notify("✅ No unread emails!")
@@ -540,8 +546,6 @@ object MessageEngine {
                                         .joinToString("\n") { "  • ${it.key}: ${it.value}" }
                                     notify("📬 Unread: $total total\n\nTop senders:\n$top")
                                 }
-                            } else {
-                                notify("📧 Gmail not initialized. Try restarting the app.")
                             }
                         }
 
@@ -559,12 +563,32 @@ object MessageEngine {
                             }
                         }
 
-                        lower2.contains("email") && (lower2.contains("check") ||
-                            lower2.contains("read") || lower2.contains("inbox") ||
-                            lower2.contains("status")) -> {
-                            val running = EmailMonitor.isRunning()
-                            val st = if (running) "active ✅" else "stopped ❌"
-                            notify("📧 Email monitor: $st\nNew emails appear here automatically.\n${ChannelManager.statusSummary()}")
+                        // Broad email query catch — list unread for any email-related phrasing
+                        // Covers: "check my email", "what emails haven't I read", "any new emails", etc.
+                        lower2.contains("email") && !lower2.contains("mark") &&
+                            (lower2.contains("check") || lower2.contains("read") ||
+                             lower2.contains("inbox") || lower2.contains("haven't") ||
+                             lower2.contains("list") || lower2.contains("show") ||
+                             lower2.contains("what") || lower2.contains("tell") ||
+                             lower2.contains("new") || lower2.contains("any") ||
+                             lower2.contains("status")) -> {
+                            val ctx = appContext
+                            if (ctx == null) {
+                                notify("📧 Gmail not initialized — restart app")
+                            } else if (!GoogleAuthManager.isSignedIn(ctx)) {
+                                notify("📧 Not signed in to Google — tap Settings → Sign in with Google to use email features.")
+                            } else {
+                                notify("📧 Fetching unread emails...")
+                                val emails = GmailApiClient.listUnreadSummary(ctx, 20)
+                                if (emails.isEmpty()) {
+                                    notify("✅ No unread emails in inbox.")
+                                } else {
+                                    val list = emails.mapIndexed { i, e ->
+                                        "${i+1}. ${e.fromName.ifEmpty { e.fromEmail }.take(25)}\n   ${e.subject.take(55)}"
+                                    }.joinToString("\n")
+                                    notify("📬 ${emails.size} unread:\n\n$list")
+                                }
+                            }
                         }
 
                         (lower2.contains("number") || lower2.contains("phone")) &&
