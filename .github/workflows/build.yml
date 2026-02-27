@@ -101,6 +101,20 @@ jobs:
             echo "✅ Native library found" || \
             echo "⚠️ Native library NOT found"
 
+      - name: Verify APK signing certificate SHA-1
+        run: |
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          echo "=== APK Signing Certificate ==="
+          BUILDTOOLS=$(ls $ANDROID_HOME/build-tools/ | sort -V | tail -1)
+          $ANDROID_HOME/build-tools/$BUILDTOOLS/apksigner verify \
+            --verbose --print-certs $APK | grep -E "SHA-1|SHA-256|signer"
+          echo "=== Keystore SHA-1 (should match above) ==="
+          keytool -list -v \
+            -keystore ~/.android/debug.keystore \
+            -alias androiddebugkey \
+            -storepass android \
+            -keypass android 2>/dev/null | grep "SHA1:"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
