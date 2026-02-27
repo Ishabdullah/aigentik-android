@@ -13,15 +13,11 @@ import com.google.android.gms.common.api.Scope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-// GoogleAuthManager v1.4
-// — Fixed keystore SHA-1: e67661285f6c279d1434c5662c1e174e32679d80
-// — Uses Web client ID for requestIdToken (required for OAuth flow)
-// — Android client ID registered in Google Cloud for SHA-1 verification
-// — Sign-in scopes: contacts.readonly only (sensitive — safe for unverified apps)
-// — ALL Gmail scopes are RESTRICTED (even gmail.readonly!) and cause silent
-//   code 10 (DEVELOPER_ERROR) on unverified apps — removed from sign-in
-// — Gmail scopes requested incrementally via GoogleAuthUtil.getToken() after
-//   sign-in succeeds — this bypasses the sign-in scope restriction
+// GoogleAuthManager v1.5 — DIAGNOSTIC BUILD
+// — requestIdToken() REMOVED to isolate if Web client is causing code 10
+// — If sign-in succeeds without idToken → Web client config is the issue
+// — If sign-in still fails → SHA-1 or package name mismatch is the root cause
+// — SCOPES also removed — bare minimum: requestEmail() only
 object GoogleAuthManager {
 
     private const val TAG = "GoogleAuthManager"
@@ -60,17 +56,12 @@ object GoogleAuthManager {
         Log.i(TAG, "Signed in as: ${account.email}")
     }
 
-    // Build GoogleSignInClient — sensitive scopes only
-    // NOTE: requestIdToken requires Web application client ID, not Android client ID
-    // Android client ID is registered in Google Cloud for SHA-1 verification only
+    // DIAGNOSTIC: bare minimum sign-in — requestEmail() only, no scopes, no idToken
+    // If this still fails with code 10 → SHA-1 or package name mismatch confirmed
+    // If this succeeds → add back requestIdToken() to test Web client
     fun buildSignInClient(context: Context): GoogleSignInClient {
-        val webClientId = context.getString(R.string.google_server_client_id)
         val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-            .requestIdToken(webClientId)
             .requestEmail()
-            .requestScopes(
-                Scope(SCOPES[0])  // contacts.readonly (sensitive — safe for unverified)
-            )
             .build()
         return GoogleSignIn.getClient(context, gso)
     }
