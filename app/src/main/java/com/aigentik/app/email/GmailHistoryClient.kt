@@ -1,6 +1,7 @@
 package com.aigentik.app.email
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.util.Log
 import com.aigentik.app.auth.GoogleAuthManager
 import com.google.gson.JsonParser
@@ -10,7 +11,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
-// GmailHistoryClient v1.0 — fetch only new INBOX messages since a known historyId
+// GmailHistoryClient v1.1 — fetch only new INBOX messages since a known historyId
 //
 // Why History API instead of listUnread():
 //   listUnread() fetches everything unread — may include old emails
@@ -19,19 +20,89 @@ import java.util.concurrent.TimeUnit
 //
 // historyTypes=messageAdded — we only care about new messages, not label changes
 // labelId=INBOX — filter to inbox only (ignores sent, draft, spam additions)
+//
+// v1.1: Added on-device historyId persistence (SharedPreferences, no cloud relay)
+//   primeHistoryId() — fetches current historyId from Gmail profile API on first init
+//   On restart: stored historyId used to catch emails that arrived while app was off
 object GmailHistoryClient {
 
     private const val TAG  = "GmailHistoryClient"
     private const val BASE = "https://gmail.googleapis.com/gmail/v1/users/me"
+
+    private const val PREF_FILE       = "gmail_history"
+    private const val PREF_HISTORY_ID = "history_id"
 
     private val http = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
-    // Returns list of Gmail message IDs added to INBOX since startHistoryId
-    // Also returns the latest historyId from the response for future calls
-    // Returns Pair(messageIds, latestHistoryId)
+    @Volatile private var cachedHistoryId: String? = null
+
+    // --- Persistent historyId storage ---
+
+    private fun prefs(context: Context): SharedPreferences =
+        context.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
+
+    fun loadHistoryId(context: Context): String? {
+        cachedHistoryId = prefs(context).getString(PREF_HISTORY_ID, null)
+        return cachedHistoryId
+    }
+
+    fun getHistoryId(): String? = cachedHistoryId
+
+    fun saveHistoryId(context: Context, historyId: String) {
+        if (historyId == cachedHistoryId) return
+        cachedHistoryId = historyId
+        prefs(context).edit().putString(PREF_HISTORY_ID, historyId).apply()
+        Log.d(TAG, "historyId saved: $historyId")
+    }
+
+    // --- Initial prime ---
+
+    // Call once on service start to establish a baseline historyId.
+    // Uses Gmail profile API: GET .../me/profile → { historyId, emailAddress, ... }
+    // If a historyId is already stored, skips the API call (preserves continuity).
+    // On restart we process only emails that arrived since last shutdown.
+    suspend fun primeHistoryId(context: Context) = withContext(Dispatchers.IO) {
+        loadHistoryId(context)
+        if (cachedHistoryId != null) {
+            Log.i(TAG, "Using stored historyId=$cachedHistoryId")
+            return@withContext
+        }
+
+        // No stored historyId — fetch current from Gmail profile
+        val token = GoogleAuthManager.getFreshToken(context) ?: run {
+            Log.w(TAG, "primeHistoryId: not signed in — skipping")
+            return@withContext
+        }
+        val req = Request.Builder()
+            .url("$BASE/profile")
+            .header("Authorization", "Bearer $token")
+            .build()
+        try {
+            val resp = http.newCall(req).execute()
+            if (!resp.isSuccessful) {
+                Log.e(TAG, "Profile API HTTP ${resp.code}")
+                return@withContext
+            }
+            val json = JsonParser.parseString(resp.body?.string()).asJsonObject
+            val historyId = json.get("historyId")?.asString
+            if (historyId != null) {
+                saveHistoryId(context, historyId)
+                Log.i(TAG, "historyId primed from Gmail profile: $historyId")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "primeHistoryId error: ${e.message}")
+        }
+    }
+
+    // --- History fetch ---
+
+    // Returns list of Gmail message IDs added to INBOX since startHistoryId.
+    // Also returns the latest historyId from the response for advancing the cursor.
+    // Returns Pair(messageIds, latestHistoryId).
+    // On 404 (historyId purged by Gmail): returns Pair(emptyList, null) — caller resets via primeHistoryId.
     suspend fun getNewInboxMessageIds(
         context: Context,
         startHistoryId: String
@@ -40,8 +111,6 @@ object GmailHistoryClient {
         val token = GoogleAuthManager.getFreshToken(context)
             ?: return@withContext Pair(emptyList(), null)
 
-        // historyTypes=messageAdded — only care about new messages landing in inbox
-        // labelId=INBOX — skip sent, drafts, labels applied to existing messages
         val url = "$BASE/history" +
             "?startHistoryId=$startHistoryId" +
             "&historyTypes=messageAdded" +
@@ -73,7 +142,6 @@ object GmailHistoryClient {
 
             val historyArray = json.getAsJsonArray("history")
             if (historyArray == null || historyArray.size() == 0) {
-                // No changes since startHistoryId — historyId may still have advanced
                 Log.d(TAG, "No new history entries since $startHistoryId")
                 return@withContext Pair(emptyList(), latestHistoryId)
             }

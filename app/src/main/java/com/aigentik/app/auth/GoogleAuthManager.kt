@@ -13,13 +13,14 @@ import com.google.android.gms.common.api.Scope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-// GoogleAuthManager v1.6
+// GoogleAuthManager v1.7
 // — Fixed keystore SHA-1: e67661285f6c279d1434c5662c1e174e32679d80
 // — Uses Web client ID for requestIdToken (required for OAuth flow)
 // — Sign-in scopes: contacts.readonly only (sensitive — safe for unverified apps)
 // — ALL Gmail scopes are RESTRICTED and cause code 10 on unverified apps
-// — Gmail + Pub/Sub scopes requested incrementally via GoogleAuthUtil.getToken() after sign-in
-// v1.6: added gmail.modify (required for trash/label/spam ops) and pubsub (push notifications)
+// — Gmail scopes requested incrementally via GoogleAuthUtil.getToken() after sign-in
+// v1.7: removed pubsub scope — Pub/Sub removed, on-device notification listener used instead
+// v1.6: added gmail.modify (required for trash/label/spam ops)
 object GoogleAuthManager {
 
     private const val TAG = "GoogleAuthManager"
@@ -37,11 +38,9 @@ object GoogleAuthManager {
     //
     // gmail.modify — read, trash, label, mark spam, batchModify (superset of gmail.readonly)
     // gmail.send   — compose and send emails
-    // pubsub       — create Pub/Sub topics/subscriptions for Gmail Watch push notifications
     val GMAIL_SCOPES = listOf(
         "https://www.googleapis.com/auth/gmail.modify",
-        "https://www.googleapis.com/auth/gmail.send",
-        "https://www.googleapis.com/auth/pubsub"
+        "https://www.googleapis.com/auth/gmail.send"
     )
 
     private var signedInAccount: GoogleSignInAccount? = null

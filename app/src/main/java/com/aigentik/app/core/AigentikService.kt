@@ -16,7 +16,7 @@ import com.aigentik.app.chat.ChatDatabase
 import com.aigentik.app.core.ChatBridge
 import com.aigentik.app.email.EmailMonitor
 import com.aigentik.app.email.EmailRouter
-import com.aigentik.app.email.GmailPushManager
+import com.aigentik.app.email.GmailHistoryClient
 import com.aigentik.app.sms.SmsRouter
 import com.aigentik.app.system.ConnectionWatchdog
 import kotlinx.coroutines.CoroutineScope
@@ -24,11 +24,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-// AigentikService v1.4
-// v1.4: Gmail push notifications via Pub/Sub Watch — near-real-time email trigger
-//   GmailPushManager.setup() registers Gmail Watch + Pub/Sub topic/subscription
-//   EmailMonitor.startPushPolling() polls every 30s for new Pub/Sub messages
-//   Falls back to NotificationAdapter listener if Pub/Sub setup fails
+// AigentikService v1.5
+// v1.5: Reverted Pub/Sub (cloud violation) — Gmail trigger is now notification-listener only
+//   GmailHistoryClient.primeHistoryId() primes a baseline historyId from Gmail profile on start
+//   EmailMonitor.onGmailNotification() is the sole trigger (same on-device pattern as SMS/RCS)
+//   History API used for efficient delta fetching when historyId is available
+// v1.4: Gmail push notifications via Pub/Sub (REMOVED — violated no-cloud policy)
 // v1.3: applicationContext passed to MessageEngine for Gmail API actions
 // v1.2: PARTIAL_WAKE_LOCK passed to MessageEngine to prevent Samsung CPU throttling
 //   during llama.cpp inference. Without it, background inference takes 5+ minutes
@@ -108,22 +109,13 @@ class AigentikService : Service() {
                 EmailMonitor.init(appCtx)
                 EmailRouter.init(appCtx)
 
-                // Set up Gmail Watch + Pub/Sub for near-real-time push notifications
-                // Runs in a separate coroutine so a slow setup doesn't block service start
-                // On failure, NotificationAdapter listener continues as fallback
+                // Prime historyId from Gmail profile — establishes baseline for History API delta fetches
+                // Runs in separate coroutine — doesn't block service start if OAuth token is slow
+                // NotificationAdapter triggers EmailMonitor.onGmailNotification() for all email processing
                 scope.launch {
-                    val pushOk = GmailPushManager.setup(appCtx)
-                    if (pushOk) {
-                        Log.i(TAG, "Gmail push notifications active (Pub/Sub Watch)")
-                        updateNotification("📬 Gmail push active")
-                    } else {
-                        Log.w(TAG, "Gmail push setup failed — notification-listener fallback only")
-                    }
+                    GmailHistoryClient.primeHistoryId(appCtx)
+                    Log.i(TAG, "Gmail historyId primed — notification-triggered processing ready")
                 }
-
-                // Start 30-second Pub/Sub polling loop inside this foreground service
-                EmailMonitor.startPushPolling(appCtx)
-                Log.i(TAG, "Email push polling started — ${appCtx.packageName}")
 
                 // MessageEngine — context for Gmail API, wakeLock for background inference
                 MessageEngine.configure(
@@ -186,7 +178,6 @@ class AigentikService : Service() {
     override fun onBind(p: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        EmailMonitor.stopPushPolling()
         EmailMonitor.stop()
         ConnectionWatchdog.stop()
         super.onDestroy()
