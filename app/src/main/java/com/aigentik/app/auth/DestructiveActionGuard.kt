@@ -53,13 +53,19 @@ object DestructiveActionGuard {
         }
     }
 
-    // Attempt to confirm pending action with password
+    // Attempt to confirm pending action with admin code
+    // Accepts natural language replies — tries each word as the admin code
+    // Supports: "yes delete 1984", "1984", "confirm yes 1984", etc.
     // Returns result message to send back to user
-    suspend fun confirmWithPassword(channelKey: String, password: String): String {
+    suspend fun confirmWithPassword(channelKey: String, rawInput: String): String {
         val action = pendingActions[channelKey]
             ?: return "⚠️ No pending action found or it has expired."
 
-        return if (AdminAuthManager.verifyPassword(password)) {
+        // Try each whitespace-separated token as the admin code
+        val tokens = rawInput.trim().split(Regex("\\s+"))
+        val verified = tokens.any { token -> AdminAuthManager.verifyPassword(token) }
+
+        return if (verified) {
             pendingActions.remove(channelKey)
             Log.i(TAG, "Destructive action confirmed for $channelKey")
             try {
@@ -70,8 +76,8 @@ object DestructiveActionGuard {
             }
         } else {
             pendingActions.remove(channelKey)
-            Log.w(TAG, "Wrong password for pending action on $channelKey")
-            "❌ Wrong password. Action cancelled for security."
+            Log.w(TAG, "Wrong admin code for pending action on $channelKey")
+            "❌ Wrong admin code. Action cancelled for security."
         }
     }
 
@@ -81,6 +87,6 @@ object DestructiveActionGuard {
 
     // Build the confirmation prompt sent back to user
     fun buildConfirmationPrompt(command: String): String =
-        "⚠️ Destructive action requested:\n\"${command.take(100)}\"\n\n" +
-        "Reply with your admin password to confirm, or anything else to cancel."
+        "⚠️ Confirm action:\n\"${command.take(150)}\"\n\n" +
+        "Reply with your admin code to confirm (e.g. \"yes delete [code]\"), or anything else to cancel."
 }

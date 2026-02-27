@@ -78,10 +78,31 @@ object GmailApiClient {
                     Log.e(TAG, "POST $url → ${resp.code}: ${resp.body?.string()?.take(200)}")
                     return@withContext null
                 }
-                JsonParser.parseString(resp.body?.string()).asJsonObject
+                // 204 No Content — success with empty body (e.g. batchModify)
+                if (resp.code == 204) return@withContext JsonObject()
+                val bodyStr = resp.body?.string() ?: return@withContext JsonObject()
+                if (bodyStr.isBlank()) return@withContext JsonObject()
+                JsonParser.parseString(bodyStr).asJsonObject
             } catch (e: Exception) {
                 Log.e(TAG, "POST failed: ${e.message}")
                 null
+            }
+        }
+
+    // Returns raw HTTP status code — used for batchDelete which returns 204
+    private suspend fun postRaw(context: Context, url: String, body: String): Int =
+        withContext(Dispatchers.IO) {
+            val token = GoogleAuthManager.getFreshToken(context) ?: return@withContext -1
+            val req = Request.Builder()
+                .url(url)
+                .header("Authorization", "Bearer $token")
+                .post(body.toRequestBody("application/json".toMediaType()))
+                .build()
+            try {
+                http.newCall(req).execute().code
+            } catch (e: Exception) {
+                Log.e(TAG, "POST raw failed: ${e.message}")
+                -1
             }
         }
 
@@ -266,6 +287,148 @@ object GmailApiClient {
             } while (pageToken != null)
             Log.i(TAG, "Trashed $count emails matching: $query")
             count
+        }
+
+    // Get a single email with metadata only (From, Subject, Date — no body)
+    // Much faster than getFullEmail() for listing/counting purposes
+    suspend fun getEmailMetadata(context: Context, messageId: String): ParsedEmail? =
+        withContext(Dispatchers.IO) {
+            val url = "$BASE/messages/$messageId" +
+                "?format=metadata" +
+                "&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date"
+            val msg = get(context, url) ?: return@withContext null
+            val headers = msg.getAsJsonObject("payload")
+                ?.getAsJsonArray("headers") ?: return@withContext null
+
+            fun header(name: String) = headers.firstOrNull {
+                it.asJsonObject.get("name")?.asString?.equals(name, true) == true
+            }?.asJsonObject?.get("value")?.asString ?: ""
+
+            val from    = header("From")
+            val subject = header("Subject")
+            val date    = header("Date")
+            val threadId = msg.get("threadId")?.asString ?: ""
+            val labels  = msg.getAsJsonArray("labelIds")
+            val isUnread = labels?.any { it.asString == "UNREAD" } == true
+
+            ParsedEmail(
+                messageId = messageId,
+                gmailId   = messageId,
+                threadId  = threadId,
+                fromEmail = parseEmail(from),
+                fromName  = parseName(from),
+                toEmail   = "",
+                subject   = subject,
+                body      = "",
+                date      = date,
+                isUnread  = isUnread
+            )
+        }
+
+    // List unread emails with metadata only — fast, no body fetch
+    suspend fun listUnreadSummary(context: Context, maxResults: Int = 50): List<ParsedEmail> =
+        withContext(Dispatchers.IO) {
+            val url = "$BASE/messages?q=is:unread+in:inbox&maxResults=$maxResults"
+            val result = get(context, url) ?: return@withContext emptyList()
+            val messages = result.getAsJsonArray("messages") ?: return@withContext emptyList()
+            messages.mapNotNull { el ->
+                val id = el.asJsonObject.get("id")?.asString ?: return@mapNotNull null
+                try { getEmailMetadata(context, id) } catch (e: Exception) { null }
+            }
+        }
+
+    // Count unread emails grouped by sender display name — returns top 15 senders
+    suspend fun countUnreadBySender(context: Context): Map<String, Int> =
+        withContext(Dispatchers.IO) {
+            val emails = listUnreadSummary(context, 200)
+            emails.groupingBy {
+                it.fromName.ifEmpty { it.fromEmail }.take(35)
+            }.eachCount()
+        }
+
+    // Search and return message IDs only (no metadata fetch) — for batch ops
+    suspend fun searchEmailIds(context: Context, query: String, maxResults: Int = 100): List<String> =
+        withContext(Dispatchers.IO) {
+            val encoded = java.net.URLEncoder.encode(query, "UTF-8")
+            val url = "$BASE/messages?q=$encoded&maxResults=$maxResults"
+            val result = get(context, url) ?: return@withContext emptyList()
+            val messages = result.getAsJsonArray("messages") ?: return@withContext emptyList()
+            messages.mapNotNull { it.asJsonObject.get("id")?.asString }
+        }
+
+    // Batch mark emails as read via batchModify
+    suspend fun batchMarkRead(context: Context, gmailIds: List<String>): Boolean =
+        withContext(Dispatchers.IO) {
+            if (gmailIds.isEmpty()) return@withContext true
+            val body = """{"ids":${gson.toJson(gmailIds)},"removeLabelIds":["UNREAD"]}"""
+            post(context, "$BASE/messages/batchModify", body) != null
+        }
+
+    // Permanently delete all emails in Trash — IRREVERSIBLE
+    // Uses batchDelete in chunks of 100 since it returns 204 No Content
+    suspend fun emptyTrash(context: Context): Int =
+        withContext(Dispatchers.IO) {
+            val ids = searchEmailIds(context, "in:trash", 500)
+            if (ids.isEmpty()) return@withContext 0
+            var deleted = 0
+            ids.chunked(100).forEach { batch ->
+                val body = """{"ids":${gson.toJson(batch)}}"""
+                val code = postRaw(context, "$BASE/messages/batchDelete", body)
+                if (code in 200..299) deleted += batch.size
+            }
+            Log.i(TAG, "emptyTrash: permanently deleted $deleted emails")
+            deleted
+        }
+
+    // Get or create a label by name — returns label ID
+    suspend fun getOrCreateLabel(context: Context, labelName: String): String? =
+        withContext(Dispatchers.IO) {
+            val labelsResp = get(context, "$BASE/labels") ?: return@withContext null
+            val labelsArr  = labelsResp.getAsJsonArray("labels") ?: return@withContext null
+
+            // Try to find existing label (case-insensitive)
+            val existing = labelsArr.firstOrNull { el ->
+                el.asJsonObject.get("name")?.asString
+                    ?.equals(labelName, ignoreCase = true) == true
+            }
+            if (existing != null) {
+                return@withContext existing.asJsonObject.get("id")?.asString
+            }
+
+            // Create new label
+            val escaped = labelName.replace("\\", "\\\\").replace("\"", "\\\"")
+            val body = """{"name":"$escaped","messageListVisibility":"show","labelListVisibility":"labelShow"}"""
+            val result = post(context, "$BASE/labels", body)
+            result?.get("id")?.asString.also { id ->
+                if (id != null) Log.i(TAG, "Created label '$labelName' → $id")
+                else Log.e(TAG, "Failed to create label '$labelName'")
+            }
+        }
+
+    // Add a label to a single email
+    suspend fun addLabel(context: Context, gmailId: String, labelId: String): Boolean =
+        withContext(Dispatchers.IO) {
+            val body = """{"addLabelIds":["$labelId"]}"""
+            post(context, "$BASE/messages/$gmailId/modify", body) != null
+        }
+
+    // Extract the List-Unsubscribe URL from an email's headers
+    // Returns HTTP URL if present, falls back to mailto, or null if none
+    suspend fun getUnsubscribeLink(context: Context, gmailId: String): String? =
+        withContext(Dispatchers.IO) {
+            val url = "$BASE/messages/$gmailId" +
+                "?format=metadata&metadataHeaders=List-Unsubscribe"
+            val msg = get(context, url) ?: return@withContext null
+            val headers = msg.getAsJsonObject("payload")
+                ?.getAsJsonArray("headers") ?: return@withContext null
+            val header = headers.firstOrNull {
+                it.asJsonObject.get("name")?.asString
+                    ?.equals("List-Unsubscribe", true) == true
+            }?.asJsonObject?.get("value")?.asString ?: return@withContext null
+
+            // Prefer HTTP unsubscribe URL over mailto
+            Regex("<(https?://[^>]+)>").find(header)?.groupValues?.get(1)
+                ?: Regex("<(mailto:[^>]+)>").find(header)?.groupValues?.get(1)
         }
 
     // GVoice helpers

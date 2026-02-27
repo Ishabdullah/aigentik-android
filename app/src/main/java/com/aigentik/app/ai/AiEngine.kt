@@ -149,18 +149,31 @@ object AiEngine {
 
             val systemMsg = "You interpret commands for an AI assistant. " +
                 "Return ONLY valid JSON with no extra text: " +
-                "{\"action\":\"string\",\"target\":\"string or null\",\"content\":\"string or null\"} " +
+                "{\"action\":\"string\",\"target\":\"string or null\",\"content\":\"string or null\",\"query\":\"string or null\"} " +
+                "The 'query' field is a Gmail search string (e.g. \"from:amazon is:unread\"). " +
                 "Actions: send_sms, send_email, find_contact, get_contact_phone, " +
-                "never_reply_to, always_reply_to, check_email, " +
-                "list_contacts, sync_contacts, status, unknown. " +
+                "never_reply_to, always_reply_to, " +
+                "gmail_count_unread, gmail_list_unread, gmail_search, " +
+                "gmail_trash, gmail_trash_all, gmail_mark_read, gmail_mark_read_all, " +
+                "gmail_mark_spam, gmail_label, gmail_unsubscribe, gmail_empty_trash, " +
+                "check_email, list_contacts, sync_contacts, status, unknown. " +
                 "Examples: " +
-                "\"text mom I'll be late\" -> {\"action\":\"send_sms\",\"target\":\"mom\",\"content\":\"I'll be late\"} " +
-                "\"what's Sarah's number\" -> {\"action\":\"get_contact_phone\",\"target\":\"Sarah\",\"content\":null} " +
-                "\"check my emails\" -> {\"action\":\"check_email\",\"target\":null,\"content\":null}"
+                "\"how many unread emails\" -> {\"action\":\"gmail_count_unread\",\"target\":null,\"content\":null,\"query\":null} " +
+                "\"list my unread emails\" -> {\"action\":\"gmail_list_unread\",\"target\":null,\"content\":null,\"query\":null} " +
+                "\"show emails from amazon\" -> {\"action\":\"gmail_search\",\"target\":\"amazon\",\"content\":null,\"query\":\"from:amazon\"} " +
+                "\"delete that email from john\" -> {\"action\":\"gmail_trash\",\"target\":\"john\",\"content\":null,\"query\":\"from:john\"} " +
+                "\"delete all emails from newsletters\" -> {\"action\":\"gmail_trash_all\",\"target\":\"newsletters\",\"content\":null,\"query\":\"from:newsletters\"} " +
+                "\"mark emails from google as read\" -> {\"action\":\"gmail_mark_read_all\",\"target\":\"google\",\"content\":null,\"query\":\"from:google is:unread\"} " +
+                "\"mark that amazon email as spam\" -> {\"action\":\"gmail_mark_spam\",\"target\":\"amazon\",\"content\":null,\"query\":\"from:amazon\"} " +
+                "\"label amazon emails as shopping\" -> {\"action\":\"gmail_label\",\"target\":\"amazon\",\"content\":\"shopping\",\"query\":\"from:amazon\"} " +
+                "\"unsubscribe from newsletters.com\" -> {\"action\":\"gmail_unsubscribe\",\"target\":\"newsletters.com\",\"content\":null,\"query\":\"from:newsletters.com\"} " +
+                "\"empty trash\" -> {\"action\":\"gmail_empty_trash\",\"target\":null,\"content\":null,\"query\":null} " +
+                "\"text mom I'll be late\" -> {\"action\":\"send_sms\",\"target\":\"mom\",\"content\":\"I'll be late\",\"query\":null} " +
+                "\"what's Sarah's number\" -> {\"action\":\"get_contact_phone\",\"target\":\"Sarah\",\"content\":null,\"query\":null}"
 
             val prompt = llama.buildChatPrompt(systemMsg, "Command: \"$commandText\"")
             try {
-                val raw = llama.generate(prompt, 100).trim()
+                val raw = llama.generate(prompt, 120).trim()
                 val clean = raw.replace(Regex("```json|```|<\\|im_end\\|>.*"), "").trim()
                 parseCommandJson(clean)
             } catch (e: Exception) {
@@ -183,6 +196,29 @@ object AiEngine {
                 val rest = lower.removePrefix("email ").removePrefix("send email ").trim()
                 val parts = rest.split(" ", limit = 2)
                 CommandResult("send_email", parts.getOrNull(0), parts.getOrNull(1), false)
+            }
+            // Gmail actions — checked before generic "email" keywords
+            lower.contains("empty") && lower.contains("trash") ->
+                CommandResult("gmail_empty_trash", null, null, false)
+            lower.contains("unread") && lower.contains("email") ->
+                CommandResult("gmail_count_unread", null, null, false)
+            (lower.contains("list") || lower.contains("show")) &&
+                (lower.contains("inbox") || lower.contains("email") || lower.contains("unread")) &&
+                !lower.contains("from") ->
+                CommandResult("gmail_list_unread", null, null, false)
+            lower.startsWith("unsubscribe from ") -> {
+                val sender = lower.removePrefix("unsubscribe from ").trim()
+                CommandResult("gmail_unsubscribe", sender, null, false,
+                    "from:$sender")
+            }
+            lower.contains("unsubscribe") ->
+                CommandResult("gmail_unsubscribe", null, null, false)
+            lower.contains("mark") && lower.contains("read") && lower.contains("all") ->
+                CommandResult("gmail_mark_read_all", null, null, false, "is:unread in:inbox")
+            lower.contains("mark") && lower.contains("spam") -> {
+                val target = Regex("from ([\\w.@-]+)").find(lower)?.groupValues?.get(1)
+                CommandResult("gmail_mark_spam", target, null, false,
+                    if (target != null) "from:$target" else null)
             }
             lower.contains("check") && lower.contains("email") ->
                 CommandResult("check_email", null, null, false)
@@ -215,7 +251,8 @@ object AiEngine {
         val action  = extractJsonValue(json, "action") ?: "unknown"
         val target  = extractJsonValue(json, "target")
         val content = extractJsonValue(json, "content")
-        return CommandResult(action, target, content, false)
+        val query   = extractJsonValue(json, "query")
+        return CommandResult(action, target, content, false, query)
     }
 
     private fun extractJsonValue(json: String, key: String): String? {
@@ -239,6 +276,7 @@ object AiEngine {
         val action: String,
         val target: String?,
         val content: String?,
-        val confirmRequired: Boolean
+        val confirmRequired: Boolean,
+        val query: String? = null  // Gmail search query (e.g. "from:amazon is:unread")
     )
 }
