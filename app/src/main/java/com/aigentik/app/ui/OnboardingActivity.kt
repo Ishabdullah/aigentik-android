@@ -12,6 +12,7 @@ import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -31,9 +32,9 @@ import com.google.android.gms.common.api.ApiException
 // - Flow: basic info → Google sign-in (optional) → permissions → model setup
 class OnboardingActivity : AppCompatActivity() {
 
-    companion object {
-        private const val RC_SIGN_IN = 9001
-        private const val STORAGE_PERMISSION_CODE = 201
+    private companion object {
+        const val RC_SIGN_IN = 9001
+        const val STORAGE_PERMISSION_CODE = 201
     }
 
     private var tvStatus: TextView? = null
@@ -55,9 +56,8 @@ class OnboardingActivity : AppCompatActivity() {
 
         // Google sign-in button
         btnGoogleSignIn?.setOnClickListener {
-            android.util.Log.d("OnboardingActivity", "Sign-in button clicked")
+            android.util.Log.d("Onboarding", "Button clicked")
             val client = GoogleAuthManager.buildSignInClient(this)
-            android.util.Log.d("OnboardingActivity", "Client built, starting intent")
             startActivityForResult(client.signInIntent, RC_SIGN_IN)
         }
 
@@ -99,12 +99,12 @@ class OnboardingActivity : AppCompatActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == RC_SIGN_IN) {
-            android.util.Log.d("OnboardingActivity", "onActivityResult: resultCode=$resultCode")
+            android.util.Log.d("Onboarding", "onActivityResult: resultCode=$resultCode")
             try {
                 val task = GoogleSignIn.getSignedInAccountFromIntent(data)
                 val account = task.getResult(ApiException::class.java)
                 if (account != null) {
-                    android.util.Log.i("OnboardingActivity", "Success: ${account.email}")
+                    android.util.Log.i("Onboarding", "Success: ${account.email}")
                     GoogleAuthManager.onSignInSuccess(this, account)
                     AigentikSettings.isOAuthSignedIn = true
                     account.email?.let { AigentikSettings.gmailAddress = it }
@@ -112,21 +112,23 @@ class OnboardingActivity : AppCompatActivity() {
                     tvStatus?.setTextColor(0xFF00D4FF.toInt())
                     tvStatus?.text = "✅ Signed in as ${account.email}"
                 } else {
-                    android.util.Log.e("OnboardingActivity", "Sign-in failed: account is null")
+                    android.util.Log.e("Onboarding", "Sign-in failed: account is null")
                     tvStatus?.setTextColor(0xFFFFAA00.toInt())
                     tvStatus?.text = "Google sign-in failed: no account received"
                 }
             } catch (e: ApiException) {
-                val statusCode = e.statusCode
-                val statusString = GoogleSignInStatusCodes.getStatusCodeString(statusCode)
-                android.util.Log.e("OnboardingActivity", "Sign-in error: $statusCode ($statusString)")
-                android.util.Log.e("OnboardingActivity", "Message: ${e.status.statusMessage}")
-                android.util.Log.e("OnboardingActivity", "Resolution: ${e.status.resolution}", e)
+                android.util.Log.e("Onboarding", "=== ERROR ===")
+                android.util.Log.e("Onboarding", "Code: ${e.statusCode}")
+                android.util.Log.e("Onboarding", "Msg: ${e.status.statusMessage}")
+                android.util.Log.e("Onboarding", "Resolution: ${e.status.resolution}")
+                android.util.Log.e("Onboarding", "GMS: ${GoogleSignInStatusCodes.getStatusCodeString(e.statusCode)}", e)
+                
+                Toast.makeText(this, "Error ${e.statusCode}: ${e.status.statusMessage}", Toast.LENGTH_LONG).show()
                 
                 tvStatus?.setTextColor(0xFFFFAA00.toInt())
-                tvStatus?.text = "Google sign-in failed ($statusString) — check Logcat for details"
+                tvStatus?.text = "Google sign-in failed (${e.statusCode}) — check Logcat"
             } catch (e: Exception) {
-                android.util.Log.e("OnboardingActivity", "Sign-in unexpected error", e)
+                android.util.Log.e("Onboarding", "Sign-in unexpected error", e)
                 tvStatus?.setTextColor(0xFFFFAA00.toInt())
                 tvStatus?.text = "Google sign-in unexpected error: ${e.message}"
             }
