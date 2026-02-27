@@ -100,6 +100,10 @@ object NotificationReplyRouter {
             action.actionIntent.send(ctx, 0, replyIntent)
 
             Log.i(TAG, "Inline reply sent pkg=${entry.packageName} key=${remoteInput.resultKey} text=${replyText.take(60)}")
+            // Mark sent text so NotificationAdapter ignores Samsung's post-reply
+            // notification update (which shows our reply as the "latest message").
+            // This prevents the self-reply loop.
+            com.aigentik.app.core.MessageDeduplicator.markSent(replyText)
             // Clean up after successful send
             sbnKeyToEntry.remove(sbnKey)
             messageIdToSbnKey.remove(messageId)

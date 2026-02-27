@@ -13,12 +13,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-// MessageEngine v1.1
-// - Channel toggle commands (stop/start sms/email/gvoice/all)
-// - Reply routing: SMS via SmsRouter, email via EmailRouter
-// - Chat notification callback — notifications appear in chat history
-// - check_email, get_contact_phone, send_email command handlers
-// - Keyword fallback for unrecognized commands before AI chat
+// MessageEngine v1.2
+// v1.2: PARTIAL_WAKE_LOCK acquired around each message handler to prevent
+//   Samsung CPU throttling during llama.cpp inference. Max 10-min timeout.
+// v1.1: Channel toggles, send_email wired, check_email, keyword fallback
 object MessageEngine {
 
     private const val TAG = "MessageEngine"
@@ -28,6 +26,7 @@ object MessageEngine {
     private var ownerName    = "Ish"
     private var agentName    = "Aigentik"
     private var ownerNotifier: ((String) -> Unit)? = null
+    private var wakeLock: android.os.PowerManager.WakeLock? = null
 
     // chatNotifier posts messages into Room DB so they appear in chat history
     var chatNotifier: ((String) -> Unit)? = null
@@ -36,12 +35,14 @@ object MessageEngine {
         adminNumber: String,
         ownerName: String,
         agentName: String,
-        ownerNotifier: (String) -> Unit
+        ownerNotifier: (String) -> Unit,
+        wakeLock: android.os.PowerManager.WakeLock? = null
     ) {
-        this.adminNumber  = PhoneNormalizer.toE164(adminNumber)
-        this.ownerName    = ownerName
-        this.agentName    = agentName
+        this.adminNumber   = PhoneNormalizer.toE164(adminNumber)
+        this.ownerName     = ownerName
+        this.agentName     = agentName
         this.ownerNotifier = ownerNotifier
+        this.wakeLock      = wakeLock
         AiEngine.configure(agentName, ownerName)
         Log.i(TAG, "$agentName MessageEngine configured")
     }
@@ -121,8 +122,16 @@ object MessageEngine {
                       message.sender.lowercase() == AigentikSettings.gmailAddress.lowercase()
 
         scope.launch {
-            if (isAdmin) handleAdminCommand(message)
-            else handlePublicMessage(message)
+            // Acquire wake lock for the duration of inference so Samsung doesn't throttle
+            // the CPU in background. Auto-times-out after 10 minutes as a safety net.
+            val wl = wakeLock
+            wl?.acquire(10 * 60 * 1000L)
+            try {
+                if (isAdmin) handleAdminCommand(message)
+                else handlePublicMessage(message)
+            } finally {
+                if (wl?.isHeld == true) wl.release()
+            }
         }
     }
 

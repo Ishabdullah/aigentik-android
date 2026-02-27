@@ -7,6 +7,7 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.aigentik.app.R
@@ -22,11 +23,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-// AigentikService v1.1
-// v1.1: ChatBridge init'd here (not just ChatActivity), OAuth replaces app password gate
-// v1.0: SmsRouter.init(), ChannelManager.loadFromSettings()
-// MessageEngine no longer takes replySender — routing is internal
-// chatNotifier wired to post notifications into Room DB via ChatBridge
+// AigentikService v1.2
+// v1.2: PARTIAL_WAKE_LOCK passed to MessageEngine to prevent Samsung CPU throttling
+//   during llama.cpp inference. Without it, background inference takes 5+ minutes
+//   instead of ~30 seconds. WakeLock is acquired per-message and auto-released.
+// v1.1: ChatBridge init'd here, OAuth replaces app password gate
 class AigentikService : Service() {
 
     companion object {
@@ -36,6 +37,7 @@ class AigentikService : Service() {
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -43,6 +45,9 @@ class AigentikService : Service() {
         // Restore Google OAuth session if previously signed in
         val oauthRestored = GoogleAuthManager.initFromStoredAccount(this)
         Log.i(TAG, "OAuth session restored: $oauthRestored")
+        // Create wake lock for AI inference — prevents Samsung CPU throttling in background
+        wakeLock = (getSystemService(POWER_SERVICE) as PowerManager)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "aigentik:inference")
         createNotificationChannel()
         startForeground(NOTIFICATION_ID,
             buildNotification("${AigentikSettings.agentName} starting..."))
@@ -98,11 +103,12 @@ class AigentikService : Service() {
                 EmailRouter.init(appCtx)
                 Log.i(TAG, "Email services initialized — waiting for Gmail notifications")
 
-                // MessageEngine — no replySender arg now (routing is internal)
+                // MessageEngine — pass wakeLock so inference keeps CPU running in background
                 MessageEngine.configure(
                     adminNumber  = adminNumber,
                     ownerName    = ownerName,
                     agentName    = agentName,
+                    wakeLock     = wakeLock,
                     ownerNotifier = { message ->
                         EmailRouter.notifyOwner(message)
                         updateNotification(message.take(60))

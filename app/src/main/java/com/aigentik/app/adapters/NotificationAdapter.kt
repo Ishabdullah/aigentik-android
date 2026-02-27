@@ -12,12 +12,12 @@ import com.aigentik.app.core.MessageEngine
 import com.aigentik.app.core.PhoneNormalizer
 import com.aigentik.app.email.EmailMonitor
 
-// NotificationAdapter v1.3
+// NotificationAdapter v1.4
+// v1.4: Self-reply prevention — wasSentRecently() check skips notifications
+//   triggered by Samsung updating the conversation after we send an inline reply
+//   (Samsung shows our reply as the "latest message" in the notification)
 // v1.3: Gmail notifications routed to EmailMonitor (not SMS path)
 // v1.2: ALWAYS register with NotificationReplyRouter even if duplicate
-//   SmsAdapter captures first → marks seen → notification fires → was being skipped
-//   Now: notification always registers for inline reply, only skips MessageEngine
-//   PhoneNormalizer used for consistent E.164 before passing to MessageEngine
 class NotificationAdapter : NotificationListenerService() {
 
     companion object {
@@ -77,6 +77,15 @@ class NotificationAdapter : NotificationListenerService() {
         val text = extras.getCharSequence(KEY_BIG_TEXT)?.toString()
             ?: extras.getCharSequence(KEY_TEXT)?.toString()
             ?: return
+
+        // Self-reply prevention: Samsung Messages updates the conversation notification
+        // after we send an inline reply, showing our reply as the "latest message".
+        // If this text matches something Aigentik recently sent, skip it entirely
+        // to prevent the self-reply loop.
+        if (MessageDeduplicator.wasSentRecently(text)) {
+            Log.d(TAG, "Skipping notification — body matches recently sent reply (self-reply prevention)")
+            return
+        }
 
         val timestamp = sbn.postTime
         val sender = resolveSender(title)
