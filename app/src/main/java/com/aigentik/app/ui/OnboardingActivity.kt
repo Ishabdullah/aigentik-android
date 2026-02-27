@@ -55,7 +55,9 @@ class OnboardingActivity : AppCompatActivity() {
 
         // Google sign-in button
         btnGoogleSignIn?.setOnClickListener {
+            android.util.Log.d("OnboardingActivity", "Sign-in button clicked")
             val client = GoogleAuthManager.buildSignInClient(this)
+            android.util.Log.d("OnboardingActivity", "Client built, starting intent")
             startActivityForResult(client.signInIntent, RC_SIGN_IN)
         }
 
@@ -97,10 +99,12 @@ class OnboardingActivity : AppCompatActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == RC_SIGN_IN) {
+            android.util.Log.d("OnboardingActivity", "onActivityResult: resultCode=$resultCode")
             try {
                 val task = GoogleSignIn.getSignedInAccountFromIntent(data)
                 val account = task.getResult(ApiException::class.java)
                 if (account != null) {
+                    android.util.Log.i("OnboardingActivity", "Success: ${account.email}")
                     GoogleAuthManager.onSignInSuccess(this, account)
                     AigentikSettings.isOAuthSignedIn = true
                     account.email?.let { AigentikSettings.gmailAddress = it }
@@ -108,21 +112,21 @@ class OnboardingActivity : AppCompatActivity() {
                     tvStatus?.setTextColor(0xFF00D4FF.toInt())
                     tvStatus?.text = "✅ Signed in as ${account.email}"
                 } else {
-                    android.util.Log.e("GoogleSignIn", "Sign-in failed: account is null")
+                    android.util.Log.e("OnboardingActivity", "Sign-in failed: account is null")
                     tvStatus?.setTextColor(0xFFFFAA00.toInt())
                     tvStatus?.text = "Google sign-in failed: no account received"
                 }
             } catch (e: ApiException) {
                 val statusCode = e.statusCode
                 val statusString = GoogleSignInStatusCodes.getStatusCodeString(statusCode)
-                android.util.Log.e("GoogleSignIn", "Sign-in failed: statusCode=$statusCode ($statusString)", e)
-                android.util.Log.e("GoogleSignIn", "Status Message: ${e.status.statusMessage}")
-                android.util.Log.e("GoogleSignIn", "Resolution: ${e.status.resolution}")
+                android.util.Log.e("OnboardingActivity", "Sign-in error: $statusCode ($statusString)")
+                android.util.Log.e("OnboardingActivity", "Message: ${e.status.statusMessage}")
+                android.util.Log.e("OnboardingActivity", "Resolution: ${e.status.resolution}", e)
                 
                 tvStatus?.setTextColor(0xFFFFAA00.toInt())
                 tvStatus?.text = "Google sign-in failed ($statusString) — check Logcat for details"
             } catch (e: Exception) {
-                android.util.Log.e("GoogleSignIn", "Sign-in unexpected error", e)
+                android.util.Log.e("OnboardingActivity", "Sign-in unexpected error", e)
                 tvStatus?.setTextColor(0xFFFFAA00.toInt())
                 tvStatus?.text = "Google sign-in unexpected error: ${e.message}"
             }
