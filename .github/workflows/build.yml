@@ -94,6 +94,22 @@ jobs:
             -Pandroid.ndkVersion=27.2.12479018 \
             --stacktrace
 
+      # Force re-sign with our fixed keystore AFTER Gradle build
+      # Gradle build cache may return a cached APK signed with a different key
+      # apksigner sign replaces all existing signatures with our fixed keystore
+      - name: Re-sign APK with fixed keystore
+        run: |
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          BUILDTOOLS=$(ls $ANDROID_HOME/build-tools/ | sort -V | tail -1)
+          echo "Build tools version: $BUILDTOOLS"
+          $ANDROID_HOME/build-tools/$BUILDTOOLS/apksigner sign \
+            --ks ~/.android/debug.keystore \
+            --ks-key-alias androiddebugkey \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            $APK
+          echo "✅ APK re-signed with fixed keystore"
+
       - name: Verify APK contains native library
         run: |
           APK=app/build/outputs/apk/debug/app-debug.apk

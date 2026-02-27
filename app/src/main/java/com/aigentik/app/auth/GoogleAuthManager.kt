@@ -13,11 +13,12 @@ import com.google.android.gms.common.api.Scope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-// GoogleAuthManager v1.5 — DIAGNOSTIC BUILD
-// — requestIdToken() REMOVED to isolate if Web client is causing code 10
-// — If sign-in succeeds without idToken → Web client config is the issue
-// — If sign-in still fails → SHA-1 or package name mismatch is the root cause
-// — SCOPES also removed — bare minimum: requestEmail() only
+// GoogleAuthManager v1.5
+// — Fixed keystore SHA-1: e67661285f6c279d1434c5662c1e174e32679d80
+// — Uses Web client ID for requestIdToken (required for OAuth flow)
+// — Sign-in scopes: contacts.readonly only (sensitive — safe for unverified apps)
+// — ALL Gmail scopes are RESTRICTED and cause code 10 on unverified apps
+// — Gmail scopes requested incrementally via GoogleAuthUtil.getToken() after sign-in
 object GoogleAuthManager {
 
     private const val TAG = "GoogleAuthManager"
@@ -56,12 +57,14 @@ object GoogleAuthManager {
         Log.i(TAG, "Signed in as: ${account.email}")
     }
 
-    // DIAGNOSTIC: bare minimum sign-in — requestEmail() only, no scopes, no idToken
-    // If this still fails with code 10 → SHA-1 or package name mismatch confirmed
-    // If this succeeds → add back requestIdToken() to test Web client
+    // Build GoogleSignInClient — sensitive scopes only, no restricted Gmail scopes
+    // requestIdToken requires Web application client ID (not Android client ID)
     fun buildSignInClient(context: Context): GoogleSignInClient {
+        val webClientId = context.getString(R.string.google_server_client_id)
         val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestIdToken(webClientId)
             .requestEmail()
+            .requestScopes(Scope(SCOPES[0]))  // contacts.readonly
             .build()
         return GoogleSignIn.getClient(context, gso)
     }
