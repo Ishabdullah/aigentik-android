@@ -13,6 +13,7 @@ import com.aigentik.app.auth.AdminAuthManager
 import com.aigentik.app.auth.GoogleAuthManager
 import com.aigentik.app.core.AigentikSettings
 import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInStatusCodes
 import com.google.android.gms.common.api.ApiException
 
 // SettingsActivity v2.0
@@ -136,19 +137,28 @@ class SettingsActivity : AppCompatActivity() {
             try {
                 val task = GoogleSignIn.getSignedInAccountFromIntent(data)
                 val account = task.getResult(ApiException::class.java)
-                GoogleAuthManager.onSignInSuccess(this, account)
-                AigentikSettings.isOAuthSignedIn = true
-                // Store email for display and API use
-                account.email?.let { AigentikSettings.gmailAddress = it }
-                refreshGoogleAccountUI()
-                showStatus("✅ Signed in as ${account.email}", success = true)
+                if (account != null) {
+                    GoogleAuthManager.onSignInSuccess(this, account)
+                    AigentikSettings.isOAuthSignedIn = true
+                    // Store email for display and API use
+                    account.email?.let { AigentikSettings.gmailAddress = it }
+                    refreshGoogleAccountUI()
+                    showStatus("✅ Signed in as ${account.email}", success = true)
+                } else {
+                    android.util.Log.e("GoogleSignIn", "Sign-in failed: account is null")
+                    showStatus("❌ Sign-in failed: no account received", success = false)
+                }
             } catch (e: ApiException) {
-                // Log full error for debugging — common codes:
-                // 10 = DEVELOPER_ERROR (SHA1 mismatch or not in test users)
-                // 12500 = Sign-in failed (consent screen issue)
-                // 12501 = Sign-in cancelled by user
-                android.util.Log.e("SettingsActivity", "Sign-in failed code=${e.statusCode} msg=${e.message}")
-                showStatus("❌ Sign-in failed: code=${e.statusCode}", success = false)
+                val statusCode = e.statusCode
+                val statusString = GoogleSignInStatusCodes.getStatusCodeString(statusCode)
+                android.util.Log.e("GoogleSignIn", "Sign-in failed: statusCode=$statusCode ($statusString)", e)
+                android.util.Log.e("GoogleSignIn", "Status Message: ${e.status.statusMessage}")
+                android.util.Log.e("GoogleSignIn", "Resolution: ${e.status.resolution}")
+                
+                showStatus("❌ Sign-in failed ($statusString) — see Logcat", success = false)
+            } catch (e: Exception) {
+                android.util.Log.e("GoogleSignIn", "Sign-in unexpected error", e)
+                showStatus("❌ Sign-in unexpected error: ${e.message}", success = false)
             }
         }
     }
