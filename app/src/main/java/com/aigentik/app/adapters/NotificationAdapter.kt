@@ -10,15 +10,14 @@ import com.aigentik.app.core.Message
 import com.aigentik.app.core.MessageDeduplicator
 import com.aigentik.app.core.MessageEngine
 import com.aigentik.app.core.PhoneNormalizer
+import com.aigentik.app.email.EmailMonitor
 
-// NotificationAdapter v1.2
-// Fix from v1.1:
-//   - ALWAYS register with NotificationReplyRouter even if duplicate
-//     SmsAdapter captures first → marks seen → notification fires → was being skipped
-//     Now: notification always registers for inline reply, only skips MessageEngine
-//     This means ALL SMS/RCS get inline reply capability regardless of capture order
-//   - PhoneNormalizer used for consistent E.164 before passing to MessageEngine
-//   - resolveSender returns full E.164 via PhoneNormalizer
+// NotificationAdapter v1.3
+// v1.3: Gmail notifications routed to EmailMonitor (not SMS path)
+// v1.2: ALWAYS register with NotificationReplyRouter even if duplicate
+//   SmsAdapter captures first → marks seen → notification fires → was being skipped
+//   Now: notification always registers for inline reply, only skips MessageEngine
+//   PhoneNormalizer used for consistent E.164 before passing to MessageEngine
 class NotificationAdapter : NotificationListenerService() {
 
     companion object {
@@ -26,9 +25,10 @@ class NotificationAdapter : NotificationListenerService() {
 
         private val MESSAGING_PACKAGES = setOf(
             "com.google.android.apps.messaging",
-            "com.samsung.android.messaging",
-        "com.google.android.gm"
+            "com.samsung.android.messaging"
         )
+
+        private const val GMAIL_PACKAGE = "com.google.android.gm"
 
         private const val KEY_TITLE    = "android.title"
         private const val KEY_TEXT     = "android.text"
@@ -51,6 +51,17 @@ class NotificationAdapter : NotificationListenerService() {
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
+        // Gmail notification → route to EmailMonitor (OAuth2 REST fetch)
+        // NOT the SMS path — email sender names are not phone numbers
+        if (sbn.packageName == GMAIL_PACKAGE) {
+            val isGroupSummary = sbn.notification.flags and Notification.FLAG_GROUP_SUMMARY != 0
+            if (isGroupSummary) return
+            Log.i(TAG, "Gmail notification detected — triggering EmailMonitor")
+            EmailMonitor.onGmailNotification(applicationContext)
+            return
+        }
+
+        // SMS/RCS messaging apps only
         if (sbn.packageName !in MESSAGING_PACKAGES) return
 
         val isGroupSummary = sbn.notification.flags and Notification.FLAG_GROUP_SUMMARY != 0

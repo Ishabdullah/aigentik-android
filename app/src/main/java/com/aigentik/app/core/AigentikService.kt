@@ -11,6 +11,8 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.aigentik.app.R
 import com.aigentik.app.ai.AiEngine
+import com.aigentik.app.chat.ChatDatabase
+import com.aigentik.app.core.ChatBridge
 import com.aigentik.app.email.EmailMonitor
 import com.aigentik.app.email.EmailRouter
 import com.aigentik.app.sms.SmsRouter
@@ -20,8 +22,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-// AigentikService v1.0
-// New: SmsRouter.init(), ChannelManager.loadFromSettings()
+// AigentikService v1.1
+// v1.1: ChatBridge init'd here (not just ChatActivity), OAuth replaces app password gate
+// v1.0: SmsRouter.init(), ChannelManager.loadFromSettings()
 // MessageEngine no longer takes replySender — routing is internal
 // chatNotifier wired to post notifications into Room DB via ChatBridge
 class AigentikService : Service() {
@@ -53,13 +56,17 @@ class AigentikService : Service() {
                 val ownerName   = AigentikSettings.ownerName
                 val adminNumber = AigentikSettings.adminNumber
                 val gmail       = AigentikSettings.gmailAddress
-                val password    = AigentikSettings.gmailAppPassword
 
-                if (gmail.isEmpty() || password.isEmpty()) {
-                    Log.e(TAG, "Gmail not configured")
-                    updateNotification("⚠️ Gmail not configured. Open app to set up.")
-                    return@launch
+                // Gmail features require either OAuth sign-in or a configured address
+                // Service still starts without Gmail — SMS/chat work independently
+                if (gmail.isEmpty() && !AigentikSettings.isOAuthSignedIn) {
+                    Log.w(TAG, "Gmail not configured — email features disabled")
+                    updateNotification("⚠️ Gmail not configured. SMS and chat still active.")
                 }
+
+                // Chat bridge — must init before MessageEngine so notifications post to Room DB
+                val chatDb = ChatDatabase.getInstance(this@AigentikService)
+                ChatBridge.init(chatDb)
 
                 // Core engines
                 ContactEngine.init(this@AigentikService)

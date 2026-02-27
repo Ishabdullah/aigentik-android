@@ -70,7 +70,9 @@ object AigentikSettings {
         get() = prefs.getString(KEY_GMAIL_ADDRESS, "") ?: ""
         set(value) = prefs.edit().putString(KEY_GMAIL_ADDRESS, value).apply()
 
-    // Kept for backward compat — will be removed once OAuth fully migrated
+    // DEPRECATED — OAuth2 replaced app passwords. Kept only for data migration.
+    // Will be removed in a future version. Do not use in new code.
+    @Deprecated("Use OAuth2 via GoogleAuthManager instead")
     var gmailAppPassword: String
         get() = prefs.getString(KEY_GMAIL_APP_PASSWORD, "") ?: ""
         set(value) = prefs.edit().putString(
@@ -119,7 +121,10 @@ object AigentikSettings {
         val errors = mutableListOf<String>()
         if (ownerName.isBlank()) errors.add("Owner name is required")
         if (adminNumber.isBlank()) errors.add("Your phone number is required")
-        if (gmailAddress.isBlank()) errors.add("Gmail address is required")
+        // Gmail address is auto-filled by OAuth sign-in — only warn, don't block
+        if (gmailAddress.isBlank() && !isOAuthSignedIn) {
+            errors.add("Gmail not configured — sign in with Google for email features")
+        }
         return errors
     }
 }

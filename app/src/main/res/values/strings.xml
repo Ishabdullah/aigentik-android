@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Aigentik</string>
-    <!-- Google OAuth2 client ID — from Google Cloud Console -->
-    <!-- Package: com.aigentik.app SHA1: 1E:BB:FD:3F:04:2B:E5:73:D4:56:E8:D7:85:33:ED:BE:C6:5B:87:CD -->
+    <!-- Google OAuth2 client IDs — from Google Cloud Console -->
+    <!-- Fixed keystore SHA-1: E6:76:61:28:5F:6C:27:9D:14:34:C5:66:2C:1E:17:4E:32:67:9D:80 -->
     <string name="google_oauth_client_id">630924077353-oopagdmapkve24ehb6pjppeph2bf292c.apps.googleusercontent.com</string>
     <string name="google_server_client_id">630924077353-oopagdmapkve24ehb6pjppeph2bf292c.apps.googleusercontent.com</string>
 </resources>

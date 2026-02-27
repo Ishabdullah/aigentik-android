@@ -245,17 +245,20 @@ object MessageEngine {
                     val contact = ContactEngine.findContact(target)
                         ?: ContactEngine.findByRelationship(target)
                     val toEmail = contact?.emails?.firstOrNull() ?: target
+                    if (!toEmail.contains("@")) {
+                        notify("No email address found for \"$target\". Try 'find $target' first.")
+                        return
+                    }
                     scope.launch {
                         val body = AiEngine.generateEmailReply(
                             contact?.name, toEmail,
                             "Message from $ownerName", content,
                             contact?.relationship, contact?.instructions
                         )
-                        val subject = "Hi from $ownerName"
-                        // TODO: wire to GmailApiClient.sendEmail() after context plumbing
-                        val sent = false
+                        val subject = "From $ownerName"
+                        val sent = EmailRouter.sendEmailDirect(toEmail, subject, body)
                         val name = contact?.name ?: target
-                        notify(if (sent) "✅ Email sent to $name" else "❌ Failed to email $name")
+                        notify(if (sent) "✅ Email sent to $name" else "❌ Failed to email $name — check Google sign-in")
                     }
                 }
 
