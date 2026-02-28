@@ -5,7 +5,7 @@ You are continuing development of Aigentik — a privacy-first Android AI assist
 ## PROJECT OVERVIEW
 - App: Aigentik Android (com.aigentik.app)
 - Repo: ~/aigentik-android (local Termux) + GitHub (builds via Actions)
-- **Current version: v1.4.8 (versionCode 58)**
+- **Current version: v1.4.9 (versionCode 59)**
 - Developer environment: Samsung S24 Ultra, Termux only — NO Android Studio, NO local Gradle builds
 - All builds happen via GitHub Actions → APK downloaded and sideloaded
 
@@ -126,7 +126,32 @@ These policies are non-negotiable. Claude MUST refuse any implementation that vi
 
 ## CHANGE LOG
 
-### v1.4.8 — Unified SMS/RCS via notification system (current, 2026-02-28)
+### v1.4.9 — Fix email notification crash + rule manager crash (current, 2026-02-28)
+Two runtime crashes fixed:
+
+1. **`MessageEngine.kt` v1.7 — EMAIL channel fix in `handlePublicMessage()`**:
+   - Was calling `ContactEngine.findOrCreateByPhone(sender)` for EMAIL channel — email address
+     treated as a phone number, creating wrong contact data.
+   - Was calling `RuleEngine.checkSms()` for EMAIL channel — email messages checked against
+     SMS rules instead of email rules, could miss applicable email rules.
+   - Fix: Added EMAIL-specific branches: `findOrCreateByEmail()` for contact lookup and
+     `checkEmail(subject, body)` for rule checking.
+   - Added `CoroutineExceptionHandler` to MessageEngine scope — prevents any uncaught
+     coroutine exception from crashing the app process.
+2. **`ContactEngine.kt` — Added `findOrCreateByEmail()`**:
+   - New method parallel to `findOrCreateByPhone()`: looks up by email, creates with
+     `source = "email"` and adds to emails list if not found.
+3. **`RuleEngine.kt` v0.6 — Async DAO writes**:
+   - `addSmsRule()`, `addEmailRule()`, `removeRule()` were calling `dao.insert()` /
+     `dao.deleteByIdentifier()` synchronously on the calling thread.
+   - `RuleManagerActivity` calls these from Button click listeners (main thread) →
+     `IllegalStateException: Cannot access database on the main thread`.
+   - Fix: Added `ioScope` (Dispatchers.IO + SupervisorJob). All three methods now dispatch
+     DAO writes to `ioScope.launch { }`. In-memory list updates remain synchronous (main
+     thread safe for immediate UI refresh).
+- Build: versionCode 59, versionName 1.4.9
+
+### v1.4.8 — Unified SMS/RCS via notification system (2026-02-28)
 Removed all direct SMS sending infrastructure. SMS and RCS now handled identically through
 the Samsung Messages notification system. Aigentik no longer requires SEND_SMS permission
 or default messaging app status.

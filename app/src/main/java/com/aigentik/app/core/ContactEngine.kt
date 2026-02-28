@@ -99,6 +99,19 @@ object ContactEngine {
         }
     }
 
+    // Find or create by email address
+    fun findOrCreateByEmail(email: String): Contact {
+        return findContact(email) ?: Contact(
+            id = "contact_${System.currentTimeMillis()}",
+            name = null,
+            source = "email"
+        ).also {
+            it.emails.add(email)
+            contacts.add(it)
+            persistContact(it)
+        }
+    }
+
     // Set per-contact reply instructions
     fun setInstructions(identifier: String, instructions: String?, behavior: ReplyBehavior?) {
         val contact = findContact(identifier) ?: findByRelationship(identifier) ?: return

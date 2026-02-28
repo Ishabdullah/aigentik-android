@@ -2,6 +2,10 @@ package com.aigentik.app.core
 
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import java.io.File
 
@@ -35,6 +39,8 @@ object RuleEngine {
     private val smsRules   = mutableListOf<Rule>()
     private val emailRules = mutableListOf<Rule>()
     private var dao: RuleDao? = null
+    // Background scope for async DAO writes — prevents main thread Room access crashes
+    private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     fun init(context: Context) {
         val db = RuleDatabase.getInstance(context)
@@ -129,7 +135,8 @@ object RuleEngine {
             action         = action
         )
         smsRules.add(0, rule) // Newer rules take priority
-        dao?.insert(rule.toEntity("sms"))
+        val entity = rule.toEntity("sms")
+        ioScope.launch { dao?.insert(entity) }
         Log.i(TAG, "SMS rule added: $description → $action")
         return rule
     }
@@ -149,7 +156,8 @@ object RuleEngine {
             action         = action
         )
         emailRules.add(0, rule)
-        dao?.insert(rule.toEntity("email"))
+        val entity = rule.toEntity("email")
+        ioScope.launch { dao?.insert(entity) }
         Log.i(TAG, "Email rule added: $description → $action")
         return rule
     }
@@ -158,8 +166,8 @@ object RuleEngine {
     fun removeRule(identifier: String): Boolean {
         val smsRemoved   = smsRules.removeIf   { it.id == identifier || it.description.lowercase().contains(identifier.lowercase()) }
         val emailRemoved = emailRules.removeIf { it.id == identifier || it.description.lowercase().contains(identifier.lowercase()) }
-        if (smsRemoved)   dao?.deleteByIdentifier("sms",   identifier)
-        if (emailRemoved) dao?.deleteByIdentifier("email", identifier)
+        if (smsRemoved)   ioScope.launch { dao?.deleteByIdentifier("sms",   identifier) }
+        if (emailRemoved) ioScope.launch { dao?.deleteByIdentifier("email", identifier) }
         return smsRemoved || emailRemoved
     }
 

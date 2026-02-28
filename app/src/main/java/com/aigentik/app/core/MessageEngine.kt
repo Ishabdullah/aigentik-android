@@ -10,12 +10,17 @@ import com.aigentik.app.core.PhoneNormalizer
 import com.aigentik.app.email.EmailMonitor
 import com.aigentik.app.email.EmailRouter
 import com.aigentik.app.email.GmailApiClient
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-// MessageEngine v1.6
+// MessageEngine v1.7
+// v1.7: Fix EMAIL channel handling in handlePublicMessage — use findOrCreateByEmail()
+//   instead of findOrCreateByPhone() and checkEmail() instead of checkSms() for EMAIL
+//   channel messages. Add CoroutineExceptionHandler to scope to prevent uncaught
+//   coroutine exceptions from crashing the app.
 // v1.6: Removed SmsRouter/SmsAdapter — SMS and RCS both handled exclusively via
 //   Samsung Messages notification + inline reply (NotificationReplyRouter).
 //   SEND_SMS/RECEIVE_SMS permissions removed. send_sms command returns capability
@@ -41,7 +46,10 @@ import kotlinx.coroutines.launch
 object MessageEngine {
 
     private const val TAG = "MessageEngine"
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val exceptionHandler = CoroutineExceptionHandler { _, e ->
+        Log.e(TAG, "Unhandled coroutine exception: ${e.message}", e)
+    }
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob() + exceptionHandler)
 
     private var adminNumber  = ""
     private var ownerName    = "Ish"
@@ -732,14 +740,22 @@ object MessageEngine {
     private suspend fun handlePublicMessage(message: Message) {
         Log.i(TAG, "Public message from ${message.sender} via ${message.channel}")
         try {
-            val contact = ContactEngine.findOrCreateByPhone(message.sender)
+            // Use email-appropriate lookup for EMAIL channel (sender is an email address)
+            val contact = if (message.channel == Message.Channel.EMAIL)
+                ContactEngine.findOrCreateByEmail(message.sender)
+            else
+                ContactEngine.findOrCreateByPhone(message.sender)
 
             if (contact.replyBehavior == ContactEngine.ReplyBehavior.NEVER) {
                 Log.i(TAG, "Never-reply contact — skipping")
                 return
             }
 
-            val (ruleAction, _) = RuleEngine.checkSms(message.sender, message.body)
+            // Use email rules for EMAIL channel, SMS rules for all other channels
+            val (ruleAction, _) = if (message.channel == Message.Channel.EMAIL)
+                RuleEngine.checkEmail(message.sender, message.subject ?: "", message.body)
+            else
+                RuleEngine.checkSms(message.sender, message.body)
             if (ruleAction == RuleEngine.Action.SPAM) {
                 Log.i(TAG, "Spam blocked")
                 return
