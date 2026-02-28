@@ -4,7 +4,15 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-// AiEngine v1.2
+// AiEngine v1.3
+// v1.3: Null-safe generate() calls — JNI nativeGenerate() can return null (e.g. OOM
+//   on the C++ side). Previously .trim() on a null return caused NPE in generateSmsReply
+//   and generateEmailReply (no inner try/catch), silently failing the chat response.
+//   All three generate() call sites now use ?.trim() ?: "" with a Throwable catch so
+//   native-side errors produce a safe fallback instead of propagating.
+//   Added Log.d before each generate() call for crash-triage visibility in logcat.
+//   AigentikPersona.name/ownerName now synced in configure() so persona responses
+//   reflect the actual agent/owner names set during onboarding.
 // v1.2: Temperature + top-p sampling for all AI generation calls.
 //   - SMS/email replies use temperature=0.7, topP=0.9 (natural, varied)
 //   - interpretCommand() uses temperature=0.0 (greedy) for deterministic JSON
@@ -32,6 +40,9 @@ object AiEngine {
     fun configure(agentName: String, ownerName: String) {
         this.agentName = agentName
         this.ownerName = ownerName
+        // Sync persona fields so AigentikPersona.respond() uses correct names
+        AigentikPersona.name      = agentName
+        AigentikPersona.ownerName = ownerName
     }
 
     // Load model then warm up — called by AigentikService on startup
@@ -126,7 +137,16 @@ object AiEngine {
 
         val prompt = llama.buildChatPrompt(systemMsg, userTurn)
         // temperature=0.7 + topP=0.9: natural, varied SMS replies
-        val reply = llama.generate(prompt, 256, temperature = 0.7f, topP = 0.9f).trim()
+        // Null-safe: nativeGenerate() can return null (OOM/native-side error).
+        // Catching Throwable ensures native JNI errors don't propagate as NPE.
+        Log.d(TAG, "generateSmsReply: invoking llama.generate()")
+        val raw = try {
+            llama.generate(prompt, 256, temperature = 0.7f, topP = 0.9f)
+        } catch (e: Throwable) {
+            Log.e(TAG, "generateSmsReply: llama.generate() threw ${e.javaClass.simpleName}: ${e.message}")
+            null
+        }
+        val reply = raw?.trim() ?: ""
 
         if (reply.isEmpty()) fallbackSmsReply(senderName, senderPhone) + signature
         else reply + signature
@@ -167,7 +187,15 @@ object AiEngine {
 
         val prompt = llama.buildChatPrompt(systemMsg, userTurn)
         // temperature=0.7 + topP=0.9: professional but not robotic email replies
-        val reply = llama.generate(prompt, 512, temperature = 0.7f, topP = 0.9f).trim()
+        // Null-safe: same reasoning as generateSmsReply above.
+        Log.d(TAG, "generateEmailReply: invoking llama.generate()")
+        val raw = try {
+            llama.generate(prompt, 512, temperature = 0.7f, topP = 0.9f)
+        } catch (e: Throwable) {
+            Log.e(TAG, "generateEmailReply: llama.generate() threw ${e.javaClass.simpleName}: ${e.message}")
+            null
+        }
+        val reply = raw?.trim() ?: ""
 
         if (reply.isEmpty()) fallbackEmailReply(fromName, fromEmail) + signature
         else reply + signature
@@ -212,11 +240,14 @@ object AiEngine {
             try {
                 // temperature=0.0 → greedy for deterministic JSON output
                 // Command parsing needs reliability over creativity
-                val raw = llama.generate(prompt, 120, temperature = 0.0f, topP = 1.0f).trim()
+                // Null-safe: nativeGenerate() can return null; treat as parse failure.
+                Log.d(TAG, "interpretCommand: invoking llama.generate()")
+                val rawStr = llama.generate(prompt, 120, temperature = 0.0f, topP = 1.0f)
+                val raw = rawStr?.trim() ?: return@withContext parseSimpleCommand(commandText)
                 val clean = raw.replace(Regex("```json|```|<\\|im_end\\|>.*"), "").trim()
                 parseCommandJson(clean)
-            } catch (e: Exception) {
-                Log.w(TAG, "Command parse failed: ${e.message}")
+            } catch (e: Throwable) {
+                Log.w(TAG, "Command parse failed (${e.javaClass.simpleName}): ${e.message}")
                 parseSimpleCommand(commandText)
             }
         }

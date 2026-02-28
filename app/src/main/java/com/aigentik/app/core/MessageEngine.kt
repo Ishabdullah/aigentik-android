@@ -16,7 +16,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-// MessageEngine v1.7
+// MessageEngine v1.8
+// v1.8: Defensive hardening for chat/NL crash:
+//   1. AigentikPersona.respond() checked before interpretCommand() — identity queries
+//      answered instantly without LLM inference (no NPE risk, no 30s wait).
+//   2. catch (e: Exception) widened to catch (e: Throwable) so OOM/Error subclasses
+//      are caught and logged; chatNotifier is always called (prevents 45s frozen UI).
+//   3. Added Log.i/e at handleAdminCommand entry and AI call sites for crash-triage.
 // v1.7: Fix EMAIL channel handling in handlePublicMessage — use findOrCreateByEmail()
 //   instead of findOrCreateByPhone() and checkEmail() instead of checkSms() for EMAIL
 //   channel messages. Add CoroutineExceptionHandler to scope to prevent uncaught
@@ -177,7 +183,7 @@ object MessageEngine {
     }
 
     private suspend fun handleAdminCommand(message: Message) {
-        Log.i(TAG, "Admin command: ${message.body}")
+        Log.i(TAG, "handleAdminCommand: entry channel=${message.channel} body='${message.body.take(80)}'")
 
         // Check for pending destructive action confirmation — applies to all channels
         // including chat (where the onMessageReceived guard block is skipped)
@@ -215,7 +221,17 @@ object MessageEngine {
             return
         }
 
+        // Persona check — instant response for identity/capability/privacy queries.
+        // Short-circuits before interpretCommand() so no LLM inference is needed.
+        val personaResponse = AigentikPersona.respond(input)
+        if (personaResponse != null) {
+            Log.i(TAG, "handleAdminCommand: persona intercept for '${input.take(40)}'")
+            notify(personaResponse)
+            return
+        }
+
         try {
+            Log.i(TAG, "handleAdminCommand: calling interpretCommand")
             val result = AiEngine.interpretCommand(input)
             Log.i(TAG, "Command: ${result.action} target=${result.target}")
 
@@ -661,6 +677,7 @@ object MessageEngine {
                         else -> {
                             // Genuine conversation — use AI
                             if (AiEngine.isReady()) {
+                                Log.d(TAG, "handleAdminCommand: generating AI chat reply")
                                 val reply = AiEngine.generateSmsReply(
                                     ownerName, adminNumber, input, null, null
                                 )
@@ -672,9 +689,11 @@ object MessageEngine {
                     }
                 }
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Command failed: ${e.message}")
-            notify("⚠️ Error: ${e.message?.take(80)}")
+        } catch (e: Throwable) {
+            // Catching Throwable (not just Exception) ensures OOM and Error subclasses
+            // are handled here — chatNotifier is called so the UI never stays frozen.
+            Log.e(TAG, "handleAdminCommand: caught ${e.javaClass.simpleName}: ${e.message}", e)
+            notify("⚠️ Error: ${e.message?.take(80) ?: e.javaClass.simpleName}")
         }
     }
 

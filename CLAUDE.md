@@ -5,7 +5,7 @@ You are continuing development of Aigentik — a privacy-first Android AI assist
 ## PROJECT OVERVIEW
 - App: Aigentik Android (com.aigentik.app)
 - Repo: ~/aigentik-android (local Termux) + GitHub (builds via Actions)
-- **Current version: v1.4.9 (versionCode 59)**
+- **Current version: v1.4.10 (versionCode 60)**
 - Developer environment: Samsung S24 Ultra, Termux only — NO Android Studio, NO local Gradle builds
 - All builds happen via GitHub Actions → APK downloaded and sideloaded
 
@@ -102,7 +102,8 @@ These policies are non-negotiable. Claude MUST refuse any implementation that vi
 - `email/GmailHistoryClient.kt` — Gmail History API + on-device historyId persistence (v1.2)
 - `adapters/NotificationAdapter.kt` — NotificationListenerService for SMS/RCS + Gmail triggers (v1.3)
 - `adapters/NotificationReplyRouter.kt` — inline reply via PendingIntent (sole outbound SMS/RCS path)
-- `ai/AiEngine.kt` — AI inference controller + command parser (CommandResult has `query` field)
+- `ai/AiEngine.kt` — AI inference controller + command parser (v1.3 — null-safe generate() calls)
+- `core/AigentikPersona.kt` — structured identity/persona layer (integrated v1.4.10 — intercepts identity queries before LLM)
 - `ai/LlamaJNI.kt` — JNI wrapper for llama.cpp
 - `ui/MainActivity.kt` — dashboard
 - `ui/ChatActivity.kt` — chat interface (v1.0 — routes through MessageEngine, not standalone LLM)
@@ -126,7 +127,37 @@ These policies are non-negotiable. Claude MUST refuse any implementation that vi
 
 ## CHANGE LOG
 
-### v1.4.9 — Fix email notification crash + rule manager crash (current, 2026-02-28)
+### v1.4.10 — Fix chat/NL crash: null-safe generate(), AigentikPersona integrated (current, 2026-02-28)
+Three defensive fixes for chat message and natural language instruction crashes:
+
+1. **`AiEngine.kt` v1.3 — Null-safe `llama.generate()` calls**:
+   - `nativeGenerate()` is a JNI external function; it can return null (e.g. OOM on C++ side).
+   - Previously all three call sites (`generateSmsReply`, `generateEmailReply`, `interpretCommand`)
+     called `.trim()` directly on the return value → NullPointerException.
+   - `generateSmsReply`/`generateEmailReply` had no inner try/catch, so the NPE propagated
+     out of the suspend function and into `handleAdminCommand`'s catch block — user saw
+     "⚠️ Error: null" instead of a real response, or the app crashed.
+   - Fix: all three sites now use `?.trim() ?: ""` with a `catch (e: Throwable)` wrapping
+     the `generate()` call. Null/error → empty string → fallback response used instead.
+   - Added `Log.d(TAG, "invoking llama.generate()")` before each call for crash-triage.
+2. **`MessageEngine.kt` v1.8 — `catch (e: Throwable)` in `handleAdminCommand`**:
+   - Previous `catch (e: Exception)` did not catch `OutOfMemoryError`, `StackOverflowError`,
+     or other `Error` subclasses that can occur during LLM inference.
+   - When an uncaught `Error` escaped the try block, `chatNotifier` was never called, leaving
+     the chat UI stuck in "Thinking..." for 45 seconds then silently timing out.
+   - Fix: widened to `catch (e: Throwable)`. Error message always delivered to chat.
+   - Added `Log.i` at entry and before `interpretCommand`/`generateSmsReply` calls.
+3. **`AigentikPersona` integrated into `handleAdminCommand`**:
+   - `AigentikPersona` was defined but never called. Identity/privacy/capability queries
+     ("who are you", "what can you do", "is my data safe", etc.) triggered full LLM inference
+     unnecessarily — wasted 5-30s and risked inference errors.
+   - Fix: `AigentikPersona.respond(input)` checked first in `handleAdminCommand`. If it
+     returns non-null, the response is delivered immediately without going through the AI.
+   - Also fixed `AiEngine.configure()` to sync `AigentikPersona.name`/`ownerName` so persona
+     responses use the actual agent/owner names from settings (were stuck at defaults).
+- Build: versionCode 60, versionName 1.4.10
+
+### v1.4.9 — Fix email notification crash + rule manager crash (2026-02-28)
 Two runtime crashes fixed:
 
 1. **`MessageEngine.kt` v1.7 — EMAIL channel fix in `handlePublicMessage()`**:
