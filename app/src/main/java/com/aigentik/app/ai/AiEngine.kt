@@ -1,6 +1,7 @@
 package com.aigentik.app.ai
 
 import android.util.Log
+import com.aigentik.app.core.AigentikPersona
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
