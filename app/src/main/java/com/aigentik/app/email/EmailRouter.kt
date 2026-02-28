@@ -2,19 +2,19 @@ package com.aigentik.app.email
 
 import android.content.Context
 import android.util.Log
-import com.aigentik.app.sms.SmsRouter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-// EmailRouter v2.0 — routes replies via GmailApiClient (OAuth2 REST)
+// EmailRouter v2.1 — routes replies via GmailApiClient (OAuth2 REST)
+// v2.1: Removed SmsRouter fallback — SEND_SMS permission removed in v1.4.8.
+//   If no email context is found for a sender, logs a warning and drops the reply.
 // REMOVED: GmailClient (JavaMail SMTP/IMAP), app password dependency
 //
 // Reply routing:
 //   GVoice SMS → reply via Gmail API to GVoice email thread
 //   Regular email → reply via Gmail API preserving thread
-//   Unknown → fallback to SmsRouter
 //
 // Privacy: all sends go Gmail API ↔ phone only, OAuth2 token
 object EmailRouter {
@@ -85,11 +85,8 @@ object EmailRouter {
             return
         }
 
-        // Fallback: no email context found — treat as phone, send SMS
-        // This can happen if MessageEngine routes EMAIL channel to here
-        // without a stored context (e.g. admin-initiated send)
-        Log.w(TAG, "No email context for $senderIdentifier — falling back to SMS")
-        SmsRouter.send(senderIdentifier, replyText)
+        // No email context found — cannot send via SMS (SEND_SMS removed in v1.4.8)
+        Log.w(TAG, "No email context for $senderIdentifier — reply dropped (no SMS fallback)")
     }
 
     // Direct email send — used by MessageEngine send_email command

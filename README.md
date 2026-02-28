@@ -29,12 +29,11 @@ Aigentik is a fully offline, on-device AI assistant for Android. It monitors you
 | Feature | Description |
 |---|---|
 | 🤖 **On-Device AI** | Powered by llama.cpp with GGUF models — fully offline inference, no API keys |
-| 💬 **SMS Auto-Reply** | Intercepts and replies to direct SMS via Android SmsManager |
-| 📲 **RCS Auto-Reply** | Intercepts RCS messages via NotificationListenerService with inline reply |
+| 💬 **SMS / RCS Auto-Reply** | Receives SMS and RCS via Samsung Messages notifications, replies via inline reply — no default messaging app required |
 | 📞 **Google Voice** | Detects GVoice-forwarded emails and replies through the correct Gmail thread |
 | 📧 **Gmail Management** | Full natural-language Gmail control via OAuth2 REST API |
 | 👥 **Contact-Aware** | Syncs Android contacts, applies per-contact reply rules and instructions |
-| 🔀 **Smart Routing** | Routes replies back through the channel they arrived on (SMS, RCS, email) |
+| 🔀 **Smart Routing** | Routes replies back through the channel they arrived on (SMS/RCS inline, email thread) |
 | 📡 **Channel Control** | Toggle SMS, GVoice, and Email monitoring on/off via natural language |
 | 🔒 **Private by Design** | Zero cloud inference, zero telemetry, zero third-party data sharing |
 | ⚡ **Always On** | Foreground service with boot receiver — restarts automatically after reboot |
@@ -94,12 +93,12 @@ Aigentik requires:
 | Permission | Purpose |
 |---|---|
 | `READ_CONTACTS` | Sync contact names for replies |
-| `RECEIVE_SMS` | Detect incoming SMS |
-| `SEND_SMS` | Send SMS replies |
 | `POST_NOTIFICATIONS` | Show service status notification |
-| `BIND_NOTIFICATION_LISTENER_SERVICE` | Intercept RCS messages |
+| `BIND_NOTIFICATION_LISTENER_SERVICE` | Receive SMS/RCS and Gmail notifications via Samsung Messages |
 | `RECEIVE_BOOT_COMPLETED` | Auto-restart after reboot |
 | `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | Stay alive in background |
+
+> **No SMS permissions required.** Aigentik does not need `SEND_SMS`, `RECEIVE_SMS`, or default messaging app status. All SMS and RCS handling goes through Samsung Messages notifications.
 
 ---
 
@@ -177,13 +176,13 @@ Destructive actions (trash, empty trash, spam, unsubscribe) require admin code c
 
 ---
 
-### SMS & Email Sending
+### Email Sending
 
 | Natural language examples | Action |
 |---|---|
-| `text Mom I'll be late` | Send SMS to Mom (looks up contact by name or relationship) |
-| `text 5551234567 call me back` | Send SMS to a specific number |
 | `email John saying the meeting is confirmed` | Send email to John's address on file |
+
+> **SMS/RCS sending is not supported.** Aigentik can only reply to messages it receives — it cannot initiate new SMS or RCS threads. If you ask Aigentik to "text" someone, it will reply: *"Sending new messages is not in my capabilities — I can only reply to messages I receive."*
 
 ---
 
@@ -238,7 +237,6 @@ When the model is not loaded (🔴 Fallback mode), Aigentik falls back to direct
 
 | Pattern | Action |
 |---|---|
-| `text [name] [message]` / `send text [name] [message]` | Send SMS |
 | `email [name] [message]` / `send email [name] [message]` | Send email |
 | `how many unread emails` / `any new emails` | Count unread |
 | `check emails` / `list unread` / `check inbox` | List unread emails |
@@ -257,17 +255,13 @@ When the model is not loaded (🔴 Fallback mode), Aigentik falls back to direct
 
 ## Auto-Reply Behavior
 
-Aigentik automatically replies to incoming messages through three channels:
+Aigentik automatically replies to incoming messages through these channels:
 
-### SMS (via SmsAdapter)
-- Registered as a `BroadcastReceiver` for `android.provider.Telephony.SMS_RECEIVED`
-- Generates a reply using the on-device LLM and sends it via `SmsManager`
+### SMS and RCS (via NotificationListenerService)
+- Detects notifications from Samsung Messages (covers both SMS and RCS in a single path)
+- Replies using the notification's `RemoteInput` action — **no `SEND_SMS` permission needed, no default messaging app required**
+- If the notification was dismissed before the reply could be sent, the owner is notified instead
 - Respects channel state (`ChannelManager.SMS`)
-
-### RCS / Samsung Messages (via NotificationListenerService)
-- Detects notification postings from Samsung Messages and Google Messages
-- Uses the notification's `RemoteInput` action to send inline replies (no SEND_SMS needed)
-- Falls back to SmsManager if no inline reply action is available
 
 ### Gmail (notification-triggered, OAuth2 REST)
 - Detects Gmail app notifications via NotificationListenerService
@@ -395,26 +389,27 @@ Any other reply cancels the pending action.
 ```
 Incoming message
        │
-       ├─ SMS ──────────────── SmsAdapter (BroadcastReceiver)
-       ├─ RCS ──────────────── NotificationAdapter (NotificationListenerService)
-       └─ Email / GVoice ───── EmailMonitor (notification-triggered OAuth2 fetch)
-                                     │
-                                     ▼
-                              MessageEngine
-                         (admin commands + public auto-reply)
-                          ┌────────┴────────────┐
-                          │                     │
-                    handleAdminCommand    handlePublicMessage
-                          │                     │
-                    AiEngine.interpretCommand()  AiEngine.generate()
-                    (LLM → structured intent)   (LLM → reply text)
-                          │                     │
-              ┌───────────┼───────────┐         │
-              │           │           │         │
-         GmailApiClient SmsRouter EmailRouter   │
-         (REST + OAuth2)              │         │
-              │                      └─────────┘
-              │                      channel routing
+       ├─ SMS / RCS ─────────── NotificationAdapter (NotificationListenerService)
+       └─ Email / GVoice ─────── EmailMonitor (notification-triggered OAuth2 fetch)
+                                       │
+                                       ▼
+                                MessageEngine
+                           (admin commands + public auto-reply)
+                            ┌────────┴────────────┐
+                            │                     │
+                      handleAdminCommand    handlePublicMessage
+                            │                     │
+                      AiEngine.interpretCommand()  AiEngine.generate()
+                      (LLM → structured intent)   (LLM → reply text)
+                            │                     │
+              ┌─────────────┴─────────┐           │
+              │                       │           │
+         GmailApiClient          EmailRouter      │
+         (REST + OAuth2)               │          │
+              │                        └─────────┘
+              │                   channel routing:
+              │                   NOTIFICATION → NotificationReplyRouter (inline reply)
+              │                   EMAIL        → GmailApiClient.reply()
               ▼
          ChatBridge → Room DB → ChatActivity (live Flow)
 ```
@@ -431,9 +426,8 @@ Incoming message
 | `EmailMonitor` | `email/EmailMonitor.kt` | Notification-triggered Gmail fetch and routing |
 | `GmailHistoryClient` | `email/GmailHistoryClient.kt` | Gmail History API delta fetch with on-device historyId storage |
 | `EmailRouter` | `email/EmailRouter.kt` | Routes email replies and owner notifications |
-| `NotificationAdapter` | `adapters/NotificationAdapter.kt` | NotificationListenerService for RCS and Gmail triggers |
-| `SmsAdapter` | `adapters/SmsAdapter.kt` | BroadcastReceiver for incoming SMS |
-| `SmsRouter` | `sms/SmsRouter.kt` | Sends SMS via SmsManager with E.164 formatting |
+| `NotificationAdapter` | `adapters/NotificationAdapter.kt` | NotificationListenerService for SMS/RCS and Gmail triggers |
+| `NotificationReplyRouter` | `adapters/NotificationReplyRouter.kt` | Sends inline replies via notification `RemoteInput` PendingIntent |
 | `ContactEngine` | `core/ContactEngine.kt` | Android contact sync + Aigentik contact intelligence |
 | `ChannelManager` | `core/ChannelManager.kt` | Channel enable/disable state with persistence |
 | `RuleEngine` | `core/RuleEngine.kt` | Message filtering rules with persistence |
@@ -525,8 +519,7 @@ Aigentik is built on a strict no-cloud policy. The following is enforced in code
 ## Roadmap
 
 - [x] On-device LLM inference (llama.cpp arm64-v8a)
-- [x] SMS auto-reply
-- [x] RCS auto-reply via NotificationListenerService
+- [x] SMS / RCS auto-reply via Samsung Messages notification + inline reply
 - [x] Google Voice forwarding detection and routing
 - [x] Gmail notification-triggered monitoring (no polling)
 - [x] Gmail History API delta fetch
@@ -538,8 +531,8 @@ Aigentik is built on a strict no-cloud policy. The following is enforced in code
 - [x] Destructive action guard (two-step confirmation)
 - [x] Remote admin authentication over SMS/email
 - [x] Wake lock for background inference (Samsung CPU throttle prevention)
-- [ ] Per-contact instruction setting via chat command
-- [ ] Multi-model hot-swap
+- [x] Per-contact instruction setting via chat command
+- [x] Multi-model hot-swap
 - [ ] Scheduled outbound messages
 - [ ] Release keystore for Play Store distribution
 
