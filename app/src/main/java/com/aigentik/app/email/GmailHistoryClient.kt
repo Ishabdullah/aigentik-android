@@ -11,7 +11,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
-// GmailHistoryClient v1.1 — fetch only new INBOX messages since a known historyId
+// GmailHistoryClient v1.2 — fetch only new INBOX messages since a known historyId
 //
 // Why History API instead of listUnread():
 //   listUnread() fetches everything unread — may include old emails
@@ -21,9 +21,10 @@ import java.util.concurrent.TimeUnit
 // historyTypes=messageAdded — we only care about new messages, not label changes
 // labelId=INBOX — filter to inbox only (ignores sent, draft, spam additions)
 //
+// v1.2: Fixed silent failure in primeHistoryId(). Now returns PrimeResult enum
+//   indicating success/failure reason. Logs specific errors for diagnostics.
+//   Token errors are propagated clearly instead of being swallowed.
 // v1.1: Added on-device historyId persistence (SharedPreferences, no cloud relay)
-//   primeHistoryId() — fetches current historyId from Gmail profile API on first init
-//   On restart: stored historyId used to catch emails that arrived while app was off
 object GmailHistoryClient {
 
     private const val TAG  = "GmailHistoryClient"
@@ -37,7 +38,18 @@ object GmailHistoryClient {
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
+    // Result of primeHistoryId() — allows callers to handle specific failure modes
+    enum class PrimeResult {
+        ALREADY_STORED,     // historyId was already in SharedPreferences
+        PRIMED_FROM_API,    // Successfully fetched from Gmail profile API
+        NO_TOKEN,           // Could not get OAuth token (not signed in or scopes needed)
+        API_ERROR,          // Gmail profile API returned non-success HTTP code
+        NETWORK_ERROR       // Network/connection failure
+    }
+
     @Volatile private var cachedHistoryId: String? = null
+    @Volatile var lastPrimeResult: PrimeResult? = null
+        private set
 
     // --- Persistent historyId storage ---
 
@@ -64,17 +76,29 @@ object GmailHistoryClient {
     // Uses Gmail profile API: GET .../me/profile → { historyId, emailAddress, ... }
     // If a historyId is already stored, skips the API call (preserves continuity).
     // On restart we process only emails that arrived since last shutdown.
-    suspend fun primeHistoryId(context: Context) = withContext(Dispatchers.IO) {
+    //
+    // Returns PrimeResult indicating success or specific failure reason.
+    // The old implementation silently returned on failure — callers had no way to know
+    // that the History API baseline was never established.
+    suspend fun primeHistoryId(context: Context): PrimeResult = withContext(Dispatchers.IO) {
         loadHistoryId(context)
         if (cachedHistoryId != null) {
             Log.i(TAG, "Using stored historyId=$cachedHistoryId")
-            return@withContext
+            lastPrimeResult = PrimeResult.ALREADY_STORED
+            return@withContext PrimeResult.ALREADY_STORED
         }
 
         // No stored historyId — fetch current from Gmail profile
-        val token = GoogleAuthManager.getFreshToken(context) ?: run {
-            Log.w(TAG, "primeHistoryId: not signed in — skipping")
-            return@withContext
+        val token = GoogleAuthManager.getFreshToken(context)
+        if (token == null) {
+            val reason = GoogleAuthManager.lastTokenError ?: "not signed in"
+            Log.w(TAG, "primeHistoryId failed: $reason")
+            // Check if this is a scope issue vs not-signed-in issue
+            if (GoogleAuthManager.hasPendingScopeResolution()) {
+                Log.w(TAG, "Gmail scope consent needed — historyId prime deferred until granted")
+            }
+            lastPrimeResult = PrimeResult.NO_TOKEN
+            return@withContext PrimeResult.NO_TOKEN
         }
         val req = Request.Builder()
             .url("$BASE/profile")
@@ -83,17 +107,31 @@ object GmailHistoryClient {
         try {
             val resp = http.newCall(req).execute()
             if (!resp.isSuccessful) {
-                Log.e(TAG, "Profile API HTTP ${resp.code}")
-                return@withContext
+                val code = resp.code
+                val body = resp.body?.string()?.take(200) ?: ""
+                Log.e(TAG, "Profile API HTTP $code: $body")
+                when (code) {
+                    401 -> Log.e(TAG, "Token expired or revoked (401) — user must re-authenticate")
+                    403 -> Log.e(TAG, "Gmail API access denied (403) — check API enablement in Cloud Console")
+                }
+                lastPrimeResult = PrimeResult.API_ERROR
+                return@withContext PrimeResult.API_ERROR
             }
             val json = JsonParser.parseString(resp.body?.string()).asJsonObject
             val historyId = json.get("historyId")?.asString
             if (historyId != null) {
                 saveHistoryId(context, historyId)
                 Log.i(TAG, "historyId primed from Gmail profile: $historyId")
+                lastPrimeResult = PrimeResult.PRIMED_FROM_API
+                return@withContext PrimeResult.PRIMED_FROM_API
             }
+            Log.w(TAG, "Gmail profile response missing historyId field")
+            lastPrimeResult = PrimeResult.API_ERROR
+            PrimeResult.API_ERROR
         } catch (e: Exception) {
-            Log.e(TAG, "primeHistoryId error: ${e.message}")
+            Log.e(TAG, "primeHistoryId network error: ${e.javaClass.simpleName}: ${e.message}")
+            lastPrimeResult = PrimeResult.NETWORK_ERROR
+            PrimeResult.NETWORK_ERROR
         }
     }
 

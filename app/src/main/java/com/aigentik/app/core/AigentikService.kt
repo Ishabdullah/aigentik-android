@@ -113,8 +113,19 @@ class AigentikService : Service() {
                 // Runs in separate coroutine — doesn't block service start if OAuth token is slow
                 // NotificationAdapter triggers EmailMonitor.onGmailNotification() for all email processing
                 scope.launch {
-                    GmailHistoryClient.primeHistoryId(appCtx)
-                    Log.i(TAG, "Gmail historyId primed — notification-triggered processing ready")
+                    val primeResult = GmailHistoryClient.primeHistoryId(appCtx)
+                    when (primeResult) {
+                        GmailHistoryClient.PrimeResult.ALREADY_STORED ->
+                            Log.i(TAG, "Gmail historyId already stored — notification-triggered processing ready")
+                        GmailHistoryClient.PrimeResult.PRIMED_FROM_API ->
+                            Log.i(TAG, "Gmail historyId primed from API — notification-triggered processing ready")
+                        GmailHistoryClient.PrimeResult.NO_TOKEN ->
+                            Log.w(TAG, "Gmail historyId prime skipped — no token (sign-in or scope grant needed)")
+                        GmailHistoryClient.PrimeResult.API_ERROR ->
+                            Log.e(TAG, "Gmail historyId prime failed — API error (check Cloud Console)")
+                        GmailHistoryClient.PrimeResult.NETWORK_ERROR ->
+                            Log.e(TAG, "Gmail historyId prime failed — network error")
+                    }
                 }
 
                 // MessageEngine — context for Gmail API, wakeLock for background inference

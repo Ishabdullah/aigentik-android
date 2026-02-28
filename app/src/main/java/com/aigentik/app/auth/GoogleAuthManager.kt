@@ -2,9 +2,11 @@ package com.aigentik.app.auth
 
 import android.accounts.Account
 import android.content.Context
+import android.content.Intent
 import com.aigentik.app.R
 import android.util.Log
 import com.google.android.gms.auth.GoogleAuthUtil
+import com.google.android.gms.auth.UserRecoverableAuthException
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInClient
@@ -13,12 +15,15 @@ import com.google.android.gms.common.api.Scope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-// GoogleAuthManager v1.7
-// — Fixed keystore SHA-1: e67661285f6c279d1434c5662c1e174e32679d80
-// — Uses Web client ID for requestIdToken (required for OAuth flow)
-// — Sign-in scopes: contacts.readonly only (sensitive — safe for unverified apps)
-// — ALL Gmail scopes are RESTRICTED and cause code 10 on unverified apps
-// — Gmail scopes requested incrementally via GoogleAuthUtil.getToken() after sign-in
+// GoogleAuthManager v1.8
+// v1.8: CRITICAL FIX — Handle UserRecoverableAuthException in getFreshToken().
+//   Gmail scopes (gmail.modify, gmail.send) are RESTRICTED and require explicit
+//   user consent via a system-provided "Grant Access" dialog. The old code caught
+//   all exceptions silently, preventing the consent dialog from ever appearing.
+//   Now: UserRecoverableAuthException is caught specifically, its resolution Intent
+//   is stored in pendingScopeIntent, and scopeResolutionListener is invoked to
+//   notify the UI (SettingsActivity) so it can launch the consent flow.
+//   Also added: gmailScopesGranted flag, hasPendingScopeResolution(), tokenHealthy flag.
 // v1.7: removed pubsub scope — Pub/Sub removed, on-device notification listener used instead
 // v1.6: added gmail.modify (required for trash/label/spam ops)
 object GoogleAuthManager {
@@ -44,6 +49,25 @@ object GoogleAuthManager {
     )
 
     private var signedInAccount: GoogleSignInAccount? = null
+
+    // --- Scope resolution state ---
+    // When getFreshToken() encounters a UserRecoverableAuthException, the resolution
+    // Intent is stored here. An Activity must launch this Intent to show the
+    // "Grant Access" dialog. After the user grants, getFreshToken() will succeed.
+    @Volatile var pendingScopeIntent: Intent? = null
+        private set
+
+    // Listener notified when scope resolution is needed. SettingsActivity sets this
+    // in onResume() and clears in onPause() to avoid leaking activity references.
+    var scopeResolutionListener: ((Intent) -> Unit)? = null
+
+    // Tracks whether Gmail scopes have been successfully granted (token obtained)
+    @Volatile var gmailScopesGranted: Boolean = false
+        private set
+
+    // Last error message from getFreshToken() — for diagnostics
+    @Volatile var lastTokenError: String? = null
+        private set
 
     // Initialize from stored account on app start
     fun initFromStoredAccount(context: Context): Boolean {
@@ -79,10 +103,16 @@ object GoogleAuthManager {
     // GoogleAuthUtil.getToken() can request scopes independently of sign-in
     // This will trigger a consent prompt on first use for Gmail scopes
     // Must run on IO thread
+    //
+    // CRITICAL: UserRecoverableAuthException is caught specifically.
+    // This exception carries an Intent that must be launched by an Activity
+    // to show the Google "Grant Access" dialog for restricted Gmail scopes.
+    // Without handling this, the app silently fails to get Gmail tokens.
     suspend fun getFreshToken(context: Context): String? = withContext(Dispatchers.IO) {
         try {
             val account = signedInAccount ?: GoogleSignIn.getLastSignedInAccount(context)
             if (account == null) {
+                lastTokenError = "No signed-in account"
                 Log.e(TAG, "No signed-in account")
                 return@withContext null
             }
@@ -93,12 +123,48 @@ object GoogleAuthManager {
             val scope = "oauth2:${allScopes.joinToString(" ")}"
             val token = GoogleAuthUtil.getToken(context, androidAccount, scope)
             Log.d(TAG, "Token obtained (length=${token.length})")
+            // Token obtained successfully — Gmail scopes are granted
+            gmailScopesGranted = true
+            pendingScopeIntent = null
+            lastTokenError = null
             token
+        } catch (e: UserRecoverableAuthException) {
+            // CRITICAL: This exception means the user hasn't granted Gmail scopes yet.
+            // The exception carries a resolution Intent that launches the consent dialog.
+            // Store it so an Activity (SettingsActivity) can launch it.
+            Log.w(TAG, "Gmail scope consent required — storing resolution intent")
+            pendingScopeIntent = e.intent
+            gmailScopesGranted = false
+            lastTokenError = "Gmail permissions not granted — tap Grant Gmail Permissions in Settings"
+            // Notify listener (if SettingsActivity is active, it will launch the consent dialog)
+            val intent = e.intent
+            if (intent != null) {
+                scopeResolutionListener?.invoke(intent)
+            }
+            null
         } catch (e: Exception) {
-            Log.e(TAG, "Token fetch failed: ${e.message}")
+            Log.e(TAG, "Token fetch failed: ${e.javaClass.simpleName}: ${e.message}")
+            lastTokenError = "Token error: ${e.message?.take(100)}"
+            gmailScopesGranted = false
             null
         }
     }
+
+    // Called after the user completes the scope consent dialog (Activity result OK)
+    // Clears the pending intent so the UI updates accordingly
+    fun onScopeConsentGranted() {
+        pendingScopeIntent = null
+        lastTokenError = null
+        Log.i(TAG, "Scope consent granted — pending intent cleared")
+    }
+
+    // Called when scope consent is denied or cancelled
+    fun onScopeConsentDenied() {
+        Log.w(TAG, "Scope consent denied by user")
+        lastTokenError = "Gmail permissions denied — required for email features"
+    }
+
+    fun hasPendingScopeResolution(): Boolean = pendingScopeIntent != null
 
     fun isSignedIn(context: Context): Boolean =
         GoogleSignIn.getLastSignedInAccount(context) != null
@@ -109,6 +175,9 @@ object GoogleAuthManager {
     fun signOut(context: Context, onComplete: () -> Unit = {}) {
         buildSignInClient(context).signOut().addOnCompleteListener {
             signedInAccount = null
+            gmailScopesGranted = false
+            pendingScopeIntent = null
+            lastTokenError = null
             Log.i(TAG, "Signed out")
             onComplete()
         }

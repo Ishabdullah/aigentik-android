@@ -139,6 +139,73 @@
             android:textSize="12sp"
             android:fontFamily="monospace"
             android:background="#0A0A1A"
+            android:padding="12dp"
+            android:layout_marginBottom="24dp"/>
+
+        <!-- Gmail Health Check -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#1A2A3A"
+            android:layout_marginBottom="16dp"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Gmail Health"
+            android:textColor="#00D4FF"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="4dp"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="OAuth token and Gmail API connectivity status."
+            android:textColor="#7BA7CC"
+            android:textSize="12sp"
+            android:layout_marginBottom="8dp"/>
+
+        <TextView android:id="@+id/tvGmailSignInStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Checking..."
+            android:textColor="#7BA7CC"
+            android:textSize="13sp"
+            android:layout_marginBottom="4dp"/>
+
+        <TextView android:id="@+id/tvGmailScopeStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textColor="#7BA7CC"
+            android:textSize="13sp"
+            android:layout_marginBottom="4dp"/>
+
+        <TextView android:id="@+id/tvGmailHistoryStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textColor="#7BA7CC"
+            android:textSize="13sp"
+            android:layout_marginBottom="8dp"/>
+
+        <Button android:id="@+id/btnCheckGmailHealth"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="Check Gmail Token"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#0F1824"
+            android:layout_marginBottom="8dp"/>
+
+        <TextView android:id="@+id/tvGmailHealthResult"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textColor="#556677"
+            android:textSize="12sp"
+            android:fontFamily="monospace"
+            android:background="#0A0A1A"
             android:padding="12dp"/>
 
     </LinearLayout>

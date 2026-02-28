@@ -129,6 +129,25 @@
             android:textColor="#FF6B6B"
             android:backgroundTint="#1A0A0A"
             android:visibility="gone"
+            android:layout_marginBottom="8dp"/>
+
+        <!-- Gmail scope status (hidden until signed in) -->
+        <TextView android:id="@+id/tvGmailScopeStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textSize="12sp"
+            android:visibility="gone"
+            android:layout_marginBottom="8dp"/>
+
+        <!-- Grant Gmail Permissions button (hidden until needed) -->
+        <Button android:id="@+id/btnGrantGmailPerms"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="Grant Gmail Permissions"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#E8710A"
+            android:visibility="gone"
             android:layout_marginBottom="24dp"/>
 
         <!-- Admin Password Section -->

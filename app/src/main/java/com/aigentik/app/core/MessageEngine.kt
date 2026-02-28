@@ -16,7 +16,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-// MessageEngine v1.4
+// MessageEngine v1.5
+// v1.5: Improved Gmail error messages (requireGmailReady() helper, scope checks).
 // v1.4: Room-backed per-contact conversation history for public message handling.
 //   Public messages (SMS, email) now include the last CONTEXT_WINDOW_TURNS turns
 //   as context when generating AI replies. This allows Aigentik to handle follow-up

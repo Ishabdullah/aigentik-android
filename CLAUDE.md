@@ -5,7 +5,7 @@ You are continuing development of Aigentik — a privacy-first Android AI assist
 ## PROJECT OVERVIEW
 - App: Aigentik Android (com.aigentik.app)
 - Repo: ~/aigentik-android (local Termux) + GitHub (builds via Actions)
-- **Current version: v1.4.6 (versionCode 56)**
+- **Current version: v1.4.7 (versionCode 57)**
 - Developer environment: Samsung S24 Ultra, Termux only — NO Android Studio, NO local Gradle builds
 - All builds happen via GitHub Actions → APK downloaded and sideloaded
 
@@ -90,13 +90,13 @@ These policies are non-negotiable. Claude MUST refuse any implementation that vi
 - `core/ConversationTurn.kt` — Room entity for per-contact conversation history
 - `core/ConversationHistoryDao.kt` — DAO for conversation history operations
 - `core/ConversationHistoryDatabase.kt` — Room DB singleton (conversation_history_database)
-- `auth/GoogleAuthManager.kt` — OAuth2 manager (v1.7)
+- `auth/GoogleAuthManager.kt` — OAuth2 manager (v1.8)
 - `auth/AdminAuthManager.kt` — remote admin auth (30-min sessions)
 - `auth/DestructiveActionGuard.kt` — two-step confirmation for Gmail destructive actions
-- `email/GmailApiClient.kt` — Gmail REST API via OkHttp (v1.2)
+- `email/GmailApiClient.kt` — Gmail REST API via OkHttp (v1.3)
 - `email/EmailMonitor.kt` — notification-triggered Gmail fetch (v4.0, no polling)
 - `email/EmailRouter.kt` — routes email replies and owner notifications
-- `email/GmailHistoryClient.kt` — Gmail History API + on-device historyId persistence (v1.1)
+- `email/GmailHistoryClient.kt` — Gmail History API + on-device historyId persistence (v1.2)
 - `adapters/NotificationAdapter.kt` — NotificationListenerService for RCS + Gmail triggers (v1.3)
 - `adapters/SmsAdapter.kt` — SMS BroadcastReceiver
 - `adapters/NotificationReplyRouter.kt` — inline reply via PendingIntent
@@ -124,7 +124,49 @@ These policies are non-negotiable. Claude MUST refuse any implementation that vi
 
 ## CHANGE LOG
 
-### v1.4.6 — Full review implementation (current, 2026-02-28)
+### v1.4.7 — Gmail forensic audit implementation (current, 2026-02-28)
+Implemented all items from aigentik-gmail-review.md (Gmail Forensic Audit):
+
+1. **CRITICAL: OAuth scope resolution** — `GoogleAuthManager.kt` v1.8: `getFreshToken()` now
+   catches `UserRecoverableAuthException` specifically (was silently caught by generic Exception).
+   Stores resolution Intent in `pendingScopeIntent`. Added `scopeResolutionListener` callback,
+   `gmailScopesGranted` flag, `lastTokenError` diagnostic string. This was the root cause
+   of Gmail being non-functional — the consent dialog for restricted scopes never appeared.
+2. **Gmail scope consent flow** — `SettingsActivity.kt` v2.2: After Google sign-in, automatically
+   attempts `getFreshToken()` to trigger Gmail scope consent. Registers `scopeResolutionListener`
+   in `onResume()` to auto-launch consent dialog. Handles `RC_GMAIL_CONSENT` activity result.
+   Added "Grant Gmail Permissions" button (orange, visible when scopes pending).
+   Added `tvGmailScopeStatus` showing scope health. Calls `ConnectionWatchdog.checkNow()`
+   after sign-in and scope grant for immediate notification dismissal.
+3. **GmailApiClient error propagation** — `GmailApiClient.kt` v1.3: Added `lastError` volatile
+   field with HTTP-code-specific messages (401 auth expired, 403 access denied, 429 rate limit).
+   `get()`/`post()`/`postRaw()` all set `lastError`. Added `checkTokenHealth()` method calling
+   `users.getProfile` to verify token validity without side effects.
+4. **GmailHistoryClient silent failure fix** — `GmailHistoryClient.kt` v1.2: `primeHistoryId()`
+   now returns `PrimeResult` enum (ALREADY_STORED, PRIMED_FROM_API, NO_TOKEN, API_ERROR,
+   NETWORK_ERROR). Added `lastPrimeResult` for diagnostics. Specific error logging for 401/403.
+   `AigentikService.kt` updated to log specific prime result.
+5. **MessageEngine Gmail error messages** — `MessageEngine.kt` v1.5: Added `requireGmailReady()`
+   helper checking context, sign-in, and scope grant status. All 11 Gmail NL actions and keyword
+   fallback sections now use this helper. Users see specific messages: "Not signed in",
+   "Gmail permissions needed", instead of generic "Gmail not initialized" or silence.
+6. **Gmail diagnostic panel** — `AiDiagnosticActivity.kt` v1.1 + layout: Added Gmail Health
+   section showing sign-in status, scope grant status, historyId prime status. "Check Gmail
+   Token" button calls `checkTokenHealth()` to verify token reaches Gmail API.
+7. **ConnectionWatchdog scope monitoring** — `ConnectionWatchdog.kt` v2.2: Now monitors sign-in
+   + scope grant status. Separate notifications: "Sign-in Required" (2001) vs "Gmail Permissions
+   Needed" (2002). Added `checkNow()` for immediate check after SettingsActivity actions.
+8. **Settings layout** — `activity_settings.xml`: Added `tvGmailScopeStatus` and
+   `btnGrantGmailPerms` between sign-out and admin password sections.
+
+Items NOT implemented (documented in gmail-review-implementation-progress.md):
+- Credentials Manager API migration — future work (current GoogleSignIn works with fix)
+- WorkManager deep sync — CONFLICTS with no-polling policy; compliant alternative proposed
+- SHA-1 Registry — already fixed via GitHub Actions keystore (DEBUG_KEYSTORE_BASE64)
+
+- Build: versionCode 57, versionName 1.4.7
+
+### v1.4.6 — Full review implementation (2026-02-28)
 Implemented all items from aigentik-android-review.md (Gemini CLI review):
 
 1. **Temperature + top-p sampling** — `llama_jni.cpp` and `LlamaJNI.kt`: SMS/email replies
@@ -433,25 +475,28 @@ Fixed keystore SHA-1 resolves ApiException code 10.
 
 ## KNOWN ISSUES / NEXT TASKS
 
-1. **Google Sign-In** — needs end-to-end test with v1.4.6 APK to confirm ApiException code 10 is gone
+1. **Google Sign-In + Gmail scopes** — v1.4.7 fixed the UserRecoverableAuthException silent catch
+   that prevented Gmail scope consent. Needs end-to-end test: sign in → consent dialog appears →
+   grant → Gmail API works. Check logcat for `GoogleAuthManager: Token obtained`.
 2. **chatNotifier race** — if AigentikService starts after ChatActivity sets chatNotifier,
    service overwrites with the same lambda. This is fine but worth monitoring if behavior diverges.
 3. **ContactEngine double-init** — ContactEngine.init() called from both AigentikService and
    ChatActivity. Second call re-syncs Android contacts (and re-runs migrateFromJsonIfNeeded,
    which is a no-op after first migration). Harmless but slightly wasteful. Low priority.
-4. **MessageEngine.appContext null if service never ran** — Gmail ops show "not initialized" in chat
-   if AigentikService hasn't started yet. Could add MessageEngine.initContext(ctx) for ChatActivity
-   to call, so Gmail works in chat even before first service start.
-5. **Per-contact instruction setting via chat** — FIXED in v1.4.6: "always reply formally to John"
-   now wired via set_contact_instructions action in AiEngine + MessageEngine.
-6. **Multi-model hot-swap** — IMPROVED in v1.4.6: ModelManagerActivity lists all downloaded models
-   with Load button per model. One model loaded at a time (model swap requires full reload ~15-30s).
+4. **MessageEngine.appContext null if service never ran** — Gmail ops now show specific error
+   ("Gmail not initialized — restart app") instead of silence. Could still improve by adding
+   MessageEngine.initContext(ctx) from ChatActivity.
+5. **Per-contact instruction setting via chat** — FIXED in v1.4.6.
+6. **Multi-model hot-swap** — IMPROVED in v1.4.6.
 7. **Conversation history in chat** — ConversationHistoryDatabase only populated for public
-   messages (SMS/email). Chat (admin) messages not stored in history. If desired in future,
-   add history for CHAT channel in handleAdminCommand() general conversation branch.
-8. **ConnectionWatchdog session restore delay** — after re-signing-in, the "Sign-in Required"
-   notification won't dismiss until the next 30-min watchdog check. Could add an immediate
-   check after sign-in success in SettingsActivity.
+   messages (SMS/email). Chat (admin) messages not stored in history.
+8. **ConnectionWatchdog session restore delay** — FIXED in v1.4.7: `checkNow()` called from
+   SettingsActivity after sign-in and scope grant for immediate notification dismissal.
+9. **Credentials Manager migration** — GoogleSignIn is legacy but works. Migration to
+   Credentials Manager API planned for future version (requires minSdk 28).
+10. **Gmail scope status persistence** — `gmailScopesGranted` is in-memory only. If the app
+    restarts, scopes must be re-verified by calling `getFreshToken()`. This is fine since
+    the service calls it during historyId prime, but worth noting.
 
 ---
 

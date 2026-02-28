@@ -19,17 +19,18 @@ import javax.mail.Session
 import javax.mail.internet.InternetAddress
 import javax.mail.internet.MimeMessage
 
-// GmailApiClient v1.2 — Gmail REST API via OkHttp
+// GmailApiClient v1.3 — Gmail REST API via OkHttp
+// v1.3: Improved error propagation — lastError tracks specific failure reasons
+//   (no token, auth error 401/403, API error, network error). Callers can check
+//   lastError to show actionable messages. Added checkTokenHealth() which calls
+//   users.getProfile to verify token validity without side effects.
+// v1.2: GVoice improvements, HTML stripping, group text detection.
+//
 // Uses OAuth2 Bearer token from GoogleAuthManager
 // No google-api-services-gmail dependency needed — direct REST calls
 //
 // API base: https://gmail.googleapis.com/gmail/v1/users/me/
 // Auth: Authorization: Bearer <token>
-//
-// Supports:
-//   listUnread, getFullEmail, sendEmail, replyToEmail,
-//   deleteEmail, markAsRead, markAsSpam, searchEmails,
-//   deleteAllMatching, replyToGoogleVoiceText
 object GmailApiClient {
 
     private const val TAG = "GmailApiClient"
@@ -44,11 +45,21 @@ object GmailApiClient {
         .build()
     private val gson = Gson()
 
+    // Last error from any API call — callers can read this for specific diagnostics
+    @Volatile var lastError: String? = null
+        private set
+
     // --- Core HTTP helpers ---
 
     private suspend fun get(context: Context, url: String): JsonObject? =
         withContext(Dispatchers.IO) {
-            val token = GoogleAuthManager.getFreshToken(context) ?: return@withContext null
+            val token = GoogleAuthManager.getFreshToken(context)
+            if (token == null) {
+                val reason = GoogleAuthManager.lastTokenError ?: "token unavailable"
+                lastError = "No Gmail token: $reason"
+                Log.e(TAG, "GET $url — no token: $reason")
+                return@withContext null
+            }
             val req = Request.Builder()
                 .url(url)
                 .header("Authorization", "Bearer $token")
@@ -56,19 +67,36 @@ object GmailApiClient {
             try {
                 val resp = http.newCall(req).execute()
                 if (!resp.isSuccessful) {
-                    Log.e(TAG, "GET $url → ${resp.code}: ${resp.body?.string()?.take(200)}")
+                    val respBody = resp.body?.string()?.take(200) ?: ""
+                    val code = resp.code
+                    Log.e(TAG, "GET $url → $code: $respBody")
+                    lastError = when (code) {
+                        401 -> "Gmail auth expired (401) — re-sign-in required"
+                        403 -> "Gmail access denied (403) — check permissions"
+                        404 -> "Gmail resource not found (404)"
+                        429 -> "Gmail rate limit exceeded (429) — try again later"
+                        else -> "Gmail API error ($code)"
+                    }
                     return@withContext null
                 }
+                lastError = null
                 JsonParser.parseString(resp.body?.string()).asJsonObject
             } catch (e: Exception) {
                 Log.e(TAG, "GET failed: ${e.message}")
+                lastError = "Network error: ${e.message?.take(80)}"
                 null
             }
         }
 
     private suspend fun post(context: Context, url: String, body: String): JsonObject? =
         withContext(Dispatchers.IO) {
-            val token = GoogleAuthManager.getFreshToken(context) ?: return@withContext null
+            val token = GoogleAuthManager.getFreshToken(context)
+            if (token == null) {
+                val reason = GoogleAuthManager.lastTokenError ?: "token unavailable"
+                lastError = "No Gmail token: $reason"
+                Log.e(TAG, "POST $url — no token: $reason")
+                return@withContext null
+            }
             val req = Request.Builder()
                 .url(url)
                 .header("Authorization", "Bearer $token")
@@ -77,9 +105,18 @@ object GmailApiClient {
             try {
                 val resp = http.newCall(req).execute()
                 if (!resp.isSuccessful) {
-                    Log.e(TAG, "POST $url → ${resp.code}: ${resp.body?.string()?.take(200)}")
+                    val respBody = resp.body?.string()?.take(200) ?: ""
+                    val code = resp.code
+                    Log.e(TAG, "POST $url → $code: $respBody")
+                    lastError = when (code) {
+                        401 -> "Gmail auth expired (401) — re-sign-in required"
+                        403 -> "Gmail access denied (403) — check permissions"
+                        429 -> "Gmail rate limit exceeded (429) — try again later"
+                        else -> "Gmail API error ($code)"
+                    }
                     return@withContext null
                 }
+                lastError = null
                 // 204 No Content — success with empty body (e.g. batchModify)
                 if (resp.code == 204) return@withContext JsonObject()
                 val bodyStr = resp.body?.string() ?: return@withContext JsonObject()
@@ -87,6 +124,7 @@ object GmailApiClient {
                 JsonParser.parseString(bodyStr).asJsonObject
             } catch (e: Exception) {
                 Log.e(TAG, "POST failed: ${e.message}")
+                lastError = "Network error: ${e.message?.take(80)}"
                 null
             }
         }
@@ -94,19 +132,36 @@ object GmailApiClient {
     // Returns raw HTTP status code — used for batchDelete which returns 204
     private suspend fun postRaw(context: Context, url: String, body: String): Int =
         withContext(Dispatchers.IO) {
-            val token = GoogleAuthManager.getFreshToken(context) ?: return@withContext -1
+            val token = GoogleAuthManager.getFreshToken(context)
+            if (token == null) {
+                val reason = GoogleAuthManager.lastTokenError ?: "token unavailable"
+                lastError = "No Gmail token: $reason"
+                return@withContext -1
+            }
             val req = Request.Builder()
                 .url(url)
                 .header("Authorization", "Bearer $token")
                 .post(body.toRequestBody("application/json".toMediaType()))
                 .build()
             try {
-                http.newCall(req).execute().code
+                val code = http.newCall(req).execute().code
+                if (code in 200..299) lastError = null
+                code
             } catch (e: Exception) {
                 Log.e(TAG, "POST raw failed: ${e.message}")
+                lastError = "Network error: ${e.message?.take(80)}"
                 -1
             }
         }
+
+    // --- Token Health Check ---
+
+    // Calls users.getProfile to verify the token is valid and Gmail API is accessible.
+    // Returns the email address if healthy, null if not. Sets lastError on failure.
+    suspend fun checkTokenHealth(context: Context): String? = withContext(Dispatchers.IO) {
+        val result = get(context, "$BASE/profile")
+        result?.get("emailAddress")?.asString
+    }
 
     // --- Public API ---
 

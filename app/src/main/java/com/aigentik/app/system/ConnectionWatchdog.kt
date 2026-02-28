@@ -17,16 +17,16 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-// ConnectionWatchdog v2.1
-// v2.1: Posts a high-priority user-facing notification when OAuth token is lost.
-//   Tapping the notification opens SettingsActivity so the user can re-sign-in.
-//   Notification is dismissed once the next check finds the session healthy.
-//   We do NOT auto-retry authentication — that would require storing credentials.
-// v2.0: REMOVED GmailClient IMAP reconnect logic — EmailMonitor is notification-driven.
-//
-// Watches:
-//   - OAuth2 token validity (Google Sign-In session)
-//   - Posts alert notification if token lost; logs healthy status otherwise
+// ConnectionWatchdog v2.2
+// v2.2: Enhanced OAuth monitoring — now checks THREE conditions:
+//   1. Google Sign-In session (isSignedIn)
+//   2. Gmail scope grant status (gmailScopesGranted / hasPendingScopeResolution)
+//   3. Immediate check after SettingsActivity sign-in via checkNow()
+//   Posts different notifications for "session lost" vs "scope consent needed".
+//   Added checkNow() for immediate check after sign-in (fixes the delay issue
+//   where the notification wouldn't dismiss until the next 30-min check).
+// v2.1: Posts high-priority notification when OAuth token is lost.
+// v2.0: REMOVED GmailClient IMAP reconnect logic.
 //
 // Runs every 30 minutes — very low overhead
 object ConnectionWatchdog {
@@ -35,18 +35,19 @@ object ConnectionWatchdog {
     private const val CHECK_INTERVAL_MS    = 30 * 60 * 1000L
     private const val ALERT_CHANNEL_ID     = "aigentik_auth_alert"
     private const val REAUTH_NOTIFICATION_ID = 2001
+    private const val SCOPE_NOTIFICATION_ID  = 2002
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var isRunning = false
     private var appContext: Context? = null
-    // Track whether we already posted the reauth notification so we don't spam
     private var reauthNotificationPosted = false
+    private var scopeNotificationPosted = false
 
     fun start(context: Context) {
         appContext = context.applicationContext
         if (isRunning) return
         isRunning = true
-        Log.i(TAG, "ConnectionWatchdog started — OAuth2 session monitor")
+        Log.i(TAG, "ConnectionWatchdog started — OAuth2 session + scope monitor")
         createAlertChannel(context.applicationContext)
         scope.launch {
             while (isActive && isRunning) {
@@ -56,22 +57,51 @@ object ConnectionWatchdog {
         }
     }
 
+    // Immediate check — call after sign-in success in SettingsActivity
+    // to dismiss notifications without waiting for the next 30-min cycle
+    fun checkNow() {
+        scope.launch { checkOAuthSession() }
+    }
+
     private fun checkOAuthSession() {
         val ctx = appContext ?: return
         val signedIn = GoogleAuthManager.isSignedIn(ctx)
+
         if (!signedIn) {
-            Log.w(TAG, "⚠️ Google OAuth session lost — user must re-sign-in in Settings")
+            Log.w(TAG, "Google OAuth session lost — user must re-sign-in")
             if (!reauthNotificationPosted) {
                 postReauthNotification(ctx)
                 reauthNotificationPosted = true
             }
+            // Dismiss scope notification if sign-in is lost entirely
+            if (scopeNotificationPosted) {
+                dismissNotification(ctx, SCOPE_NOTIFICATION_ID)
+                scopeNotificationPosted = false
+            }
         } else {
-            Log.d(TAG, "OAuth session healthy")
-            // Clear the notification and flag once session is restored
+            // Session exists — clear reauth notification
             if (reauthNotificationPosted) {
-                dismissReauthNotification(ctx)
+                dismissNotification(ctx, REAUTH_NOTIFICATION_ID)
                 reauthNotificationPosted = false
                 Log.i(TAG, "OAuth session restored — reauth notification dismissed")
+            }
+
+            // Check scope status
+            if (GoogleAuthManager.hasPendingScopeResolution()) {
+                Log.w(TAG, "Gmail scope consent needed — user must grant permissions")
+                if (!scopeNotificationPosted) {
+                    postScopeNotification(ctx)
+                    scopeNotificationPosted = true
+                }
+            } else if (GoogleAuthManager.gmailScopesGranted) {
+                Log.d(TAG, "OAuth session + Gmail scopes healthy")
+                if (scopeNotificationPosted) {
+                    dismissNotification(ctx, SCOPE_NOTIFICATION_ID)
+                    scopeNotificationPosted = false
+                    Log.i(TAG, "Gmail scopes granted — scope notification dismissed")
+                }
+            } else {
+                Log.d(TAG, "OAuth session healthy, scope status unknown (not yet checked)")
             }
         }
     }
@@ -104,9 +134,36 @@ object ConnectionWatchdog {
         Log.i(TAG, "Reauth notification posted")
     }
 
-    private fun dismissReauthNotification(ctx: Context) {
+    // Post notification when Gmail scopes need consent
+    private fun postScopeNotification(ctx: Context) {
+        val settingsIntent = Intent(ctx, SettingsActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            ctx, SCOPE_NOTIFICATION_ID, settingsIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(ctx, ALERT_CHANNEL_ID)
+            .setContentTitle("Aigentik: Gmail Permissions Needed")
+            .setContentText("Tap to grant Gmail access so email features work correctly.")
+            .setStyle(NotificationCompat.BigTextStyle()
+                .bigText("Aigentik needs your permission to read and send Gmail on your behalf. Tap to open Settings and grant Gmail permissions."))
+            .setSmallIcon(R.drawable.ic_launcher)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setOngoing(false)
+            .build()
+
         val nm = ctx.getSystemService(NotificationManager::class.java)
-        nm.cancel(REAUTH_NOTIFICATION_ID)
+        nm.notify(SCOPE_NOTIFICATION_ID, notification)
+        Log.i(TAG, "Scope consent notification posted")
+    }
+
+    private fun dismissNotification(ctx: Context, notificationId: Int) {
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        nm.cancel(notificationId)
     }
 
     // High-priority channel for actionable alerts (distinct from the low-priority service channel)
