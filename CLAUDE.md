@@ -5,7 +5,7 @@ You are continuing development of Aigentik — a privacy-first Android AI assist
 ## PROJECT OVERVIEW
 - App: Aigentik Android (com.aigentik.app)
 - Repo: ~/aigentik-android (local Termux) + GitHub (builds via Actions)
-- **Current version: v1.4.7 (versionCode 57)**
+- **Current version: v1.4.8 (versionCode 58)**
 - Developer environment: Samsung S24 Ultra, Termux only — NO Android Studio, NO local Gradle builds
 - All builds happen via GitHub Actions → APK downloaded and sideloaded
 
@@ -58,7 +58,10 @@ These policies are non-negotiable. Claude MUST refuse any implementation that vi
 
 - On-device AI inference via llama.cpp (C++ NDK, arm64-v8a)
 - Model: GGUF format stored on device /sdcard or internal storage
-- SMS/RCS auto-reply via NotificationListenerService (Samsung Messages inline reply)
+- SMS/RCS handled exclusively via Samsung Messages notification → NotificationListenerService → inline reply
+  - Aigentik does NOT require SEND_SMS permission or default messaging app status
+  - Aigentik can only REPLY to received messages — it cannot initiate new SMS/RCS threads
+  - If inline reply fails (notification dismissed), owner is notified; no SmsManager fallback
 - Gmail monitoring via Gmail app notification → NotificationAdapter → EmailMonitor → Gmail REST API (OAuth2)
 - Google Voice SMS forwarded as Gmail → parsed (subject line parsing) and replied via email thread
 - Gmail natural language interface: chat/SMS commands → AiEngine.interpretCommand() → Gmail API actions
@@ -73,7 +76,7 @@ These policies are non-negotiable. Claude MUST refuse any implementation that vi
 
 - `core/AigentikService.kt` — main foreground service (v1.5)
 - `core/AigentikSettings.kt` — SharedPreferences wrapper
-- `core/MessageEngine.kt` — AI command processor (v1.3)
+- `core/MessageEngine.kt` — AI command processor (v1.6)
 - `core/Message.kt` — unified message object (has `subject` field for email)
 - `core/ChannelManager.kt` — channel state tracker (SMS, GVOICE, EMAIL)
 - `core/RuleEngine.kt` — message filtering rules (persist to files/rules/)
@@ -97,9 +100,8 @@ These policies are non-negotiable. Claude MUST refuse any implementation that vi
 - `email/EmailMonitor.kt` — notification-triggered Gmail fetch (v4.0, no polling)
 - `email/EmailRouter.kt` — routes email replies and owner notifications
 - `email/GmailHistoryClient.kt` — Gmail History API + on-device historyId persistence (v1.2)
-- `adapters/NotificationAdapter.kt` — NotificationListenerService for RCS + Gmail triggers (v1.3)
-- `adapters/SmsAdapter.kt` — SMS BroadcastReceiver
-- `adapters/NotificationReplyRouter.kt` — inline reply via PendingIntent
+- `adapters/NotificationAdapter.kt` — NotificationListenerService for SMS/RCS + Gmail triggers (v1.3)
+- `adapters/NotificationReplyRouter.kt` — inline reply via PendingIntent (sole outbound SMS/RCS path)
 - `ai/AiEngine.kt` — AI inference controller + command parser (CommandResult has `query` field)
 - `ai/LlamaJNI.kt` — JNI wrapper for llama.cpp
 - `ui/MainActivity.kt` — dashboard
@@ -124,7 +126,27 @@ These policies are non-negotiable. Claude MUST refuse any implementation that vi
 
 ## CHANGE LOG
 
-### v1.4.7 — Gmail forensic audit implementation (current, 2026-02-28)
+### v1.4.8 — Unified SMS/RCS via notification system (current, 2026-02-28)
+Removed all direct SMS sending infrastructure. SMS and RCS now handled identically through
+the Samsung Messages notification system. Aigentik no longer requires SEND_SMS permission
+or default messaging app status.
+
+1. **Removed `SmsAdapter.kt`** — BroadcastReceiver for `SMS_RECEIVED` is no longer needed.
+   All incoming SMS/RCS arrive via Samsung Messages notifications (NotificationAdapter).
+2. **Removed `SmsRouter.kt`** — `SmsManager`-based SMS sending removed entirely. All outbound
+   SMS/RCS go through `NotificationReplyRouter.sendReply()` (inline reply via PendingIntent).
+3. **Removed permissions** — `RECEIVE_SMS`, `SEND_SMS`, `READ_SMS` removed from AndroidManifest.
+   Also removed `SmsAdapter` receiver registration.
+4. **`MessageEngine.kt` v1.6** — All `SmsRouter.send()` calls replaced:
+   - `send_sms` action returns: "Sending new messages is not in my capabilities — I can only reply to messages I receive."
+   - `replyToSender()` NOTIFICATION fallback: logs warning only (no SmsManager fallback)
+   - `handlePublicMessage()` inline reply failure: notifies owner that notification was dismissed
+   - Keyword fallback "text"/"send" branch: same capability message as above
+   - `sendReply()` public function: logs warning, no-op
+5. **`AigentikService.kt`** — Removed `SmsRouter.init()` call and import.
+- Build: versionCode 58, versionName 1.4.8
+
+### v1.4.7 — Gmail forensic audit implementation (2026-02-28)
 Implemented all items from aigentik-gmail-review.md (Gmail Forensic Audit):
 
 1. **CRITICAL: OAuth scope resolution** — `GoogleAuthManager.kt` v1.8: `getFreshToken()` now
@@ -445,16 +467,16 @@ Fixed keystore SHA-1 resolves ApiException code 10.
 
 ---
 
-## TESTING PLAN (v1.4.5)
+## TESTING PLAN (v1.4.8)
 
-### Chat functionality (previously broken — now fixed in v1.4.4 + v1.4.5)
+### Chat functionality
 1. Open Chat — should not crash on send
 2. Type `status` → should show agent state, contact count, AI state without crash
 3. Type `find [contact name]` → should look up contact
 4. Type `help` → should show command list instantly
 5. Type `check emails` → if signed in: shows unread list. If not: "Not signed in to Google" message
 6. Type `how many unread emails` → count by sender
-7. Type `text Mom I'll be late` → sends SMS
+7. Type `text Mom I'll be late` → should reply "Sending new messages is not in my capabilities — I can only reply to messages I receive."
 8. Type any general message (e.g. "hello") → AI reply if model loaded, fallback hint if not
 
 ### Gmail trigger (notification-driven)
@@ -478,25 +500,25 @@ Fixed keystore SHA-1 resolves ApiException code 10.
 1. **Google Sign-In + Gmail scopes** — v1.4.7 fixed the UserRecoverableAuthException silent catch
    that prevented Gmail scope consent. Needs end-to-end test: sign in → consent dialog appears →
    grant → Gmail API works. Check logcat for `GoogleAuthManager: Token obtained`.
-2. **chatNotifier race** — if AigentikService starts after ChatActivity sets chatNotifier,
+2. **SMS inline reply window** — Inline replies only work while Samsung Messages notification is
+   active. If the notification was dismissed, the reply fails and owner is notified. This is by
+   design (v1.4.8). No fallback exists. If reply-after-dismiss is a problem, consider adding
+   a "missed reply" log in AiDiagnosticActivity.
+3. **chatNotifier race** — if AigentikService starts after ChatActivity sets chatNotifier,
    service overwrites with the same lambda. This is fine but worth monitoring if behavior diverges.
-3. **ContactEngine double-init** — ContactEngine.init() called from both AigentikService and
+4. **ContactEngine double-init** — ContactEngine.init() called from both AigentikService and
    ChatActivity. Second call re-syncs Android contacts (and re-runs migrateFromJsonIfNeeded,
    which is a no-op after first migration). Harmless but slightly wasteful. Low priority.
-4. **MessageEngine.appContext null if service never ran** — Gmail ops now show specific error
+5. **MessageEngine.appContext null if service never ran** — Gmail ops now show specific error
    ("Gmail not initialized — restart app") instead of silence. Could still improve by adding
    MessageEngine.initContext(ctx) from ChatActivity.
-5. **Per-contact instruction setting via chat** — FIXED in v1.4.6.
-6. **Multi-model hot-swap** — IMPROVED in v1.4.6.
-7. **Conversation history in chat** — ConversationHistoryDatabase only populated for public
+6. **Conversation history in chat** — ConversationHistoryDatabase only populated for public
    messages (SMS/email). Chat (admin) messages not stored in history.
-8. **ConnectionWatchdog session restore delay** — FIXED in v1.4.7: `checkNow()` called from
-   SettingsActivity after sign-in and scope grant for immediate notification dismissal.
-9. **Credentials Manager migration** — GoogleSignIn is legacy but works. Migration to
+7. **Credentials Manager migration** — GoogleSignIn is legacy but works. Migration to
    Credentials Manager API planned for future version (requires minSdk 28).
-10. **Gmail scope status persistence** — `gmailScopesGranted` is in-memory only. If the app
-    restarts, scopes must be re-verified by calling `getFreshToken()`. This is fine since
-    the service calls it during historyId prime, but worth noting.
+8. **Gmail scope status persistence** — `gmailScopesGranted` is in-memory only. If the app
+   restarts, scopes must be re-verified by calling `getFreshToken()`. This is fine since
+   the service calls it during historyId prime, but worth noting.
 
 ---
 

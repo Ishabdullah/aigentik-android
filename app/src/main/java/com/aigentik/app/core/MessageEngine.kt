@@ -10,13 +10,16 @@ import com.aigentik.app.core.PhoneNormalizer
 import com.aigentik.app.email.EmailMonitor
 import com.aigentik.app.email.EmailRouter
 import com.aigentik.app.email.GmailApiClient
-import com.aigentik.app.sms.SmsRouter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-// MessageEngine v1.5
+// MessageEngine v1.6
+// v1.6: Removed SmsRouter/SmsAdapter — SMS and RCS both handled exclusively via
+//   Samsung Messages notification + inline reply (NotificationReplyRouter).
+//   SEND_SMS/RECEIVE_SMS permissions removed. send_sms command returns capability
+//   message. Inline reply failure notifies owner instead of falling back to SmsManager.
 // v1.5: Improved Gmail error messages (requireGmailReady() helper, scope checks).
 // v1.4: Room-backed per-contact conversation history for public message handling.
 //   Public messages (SMS, email) now include the last CONTEXT_WINDOW_TURNS turns
@@ -90,9 +93,9 @@ object MessageEngine {
                 val sent = com.aigentik.app.adapters.NotificationReplyRouter.sendReply(
                     message.id, reply
                 )
-                if (!sent) SmsRouter.send(message.sender, reply)
+                if (!sent) Log.w(TAG, "Inline reply failed for ${message.sender} — no fallback (SEND_SMS removed)")
             }
-            Message.Channel.SMS   -> SmsRouter.send(message.sender, reply)
+            Message.Channel.SMS   -> Log.w(TAG, "SMS channel reply skipped — SEND_SMS removed")
             Message.Channel.EMAIL -> EmailRouter.routeReply(message.sender, reply)
             Message.Channel.CHAT  -> notify(reply)
         }
@@ -293,19 +296,7 @@ object MessageEngine {
                 }
 
                 "send_sms" -> {
-                    val target = result.target ?: run { notify("Who should I text?"); return }
-                    val content = result.content ?: run { notify("What should I say?"); return }
-                    val contact = ContactEngine.findContact(target)
-                        ?: ContactEngine.findByRelationship(target)
-                    val toNumber = contact?.phones?.firstOrNull() ?: target
-                    val naturalMsg = AiEngine.generateSmsReply(
-                        contact?.name, toNumber, content,
-                        contact?.relationship, contact?.instructions
-                    )
-                    SmsRouter.send(toNumber, naturalMsg)
-                    val name = contact?.name ?: target
-                    val preview = naturalMsg.take(100)
-                    notify("✅ Text sent to $name:\n\"$preview\"")
+                    notify("Sending new messages is not in my capabilities — I can only reply to messages I receive.")
                 }
 
                 "send_email" -> {
@@ -656,22 +647,7 @@ object MessageEngine {
                         }
 
                         lower2.startsWith("text ") || lower2.startsWith("send ") -> {
-                            val fallback = AiEngine.parseSimpleCommandPublic(input)
-                            if (fallback.action == "send_sms" && fallback.target != null) {
-                                val contact = ContactEngine.findContact(fallback.target)
-                                    ?: ContactEngine.findByRelationship(fallback.target)
-                                val toNumber = contact?.phones?.firstOrNull() ?: fallback.target
-                                val msg = AiEngine.generateSmsReply(
-                                    contact?.name, toNumber,
-                                    fallback.content ?: input,
-                                    contact?.relationship, contact?.instructions
-                                )
-                                SmsRouter.send(toNumber, msg)
-                                val name = contact?.name ?: fallback.target
-                                notify("✅ Text sent to $name")
-                            } else {
-                                notify("Who should I text, and what should I say?")
-                            }
+                            notify("Sending new messages is not in my capabilities — I can only reply to messages I receive.")
                         }
 
                         else -> {
@@ -816,8 +792,7 @@ object MessageEngine {
                 recordHistory(contactKey, channelName, "assistant", replyForHistory)
 
                 // Route by channel
-                // NOTIFICATION = RCS/SMS via inline reply (no SEND_SMS needed)
-                // SMS = direct SmsManager (admin-initiated or fallback)
+                // NOTIFICATION = RCS/SMS via Samsung Messages inline reply (no SEND_SMS needed)
                 // EMAIL = Gmail REST API reply in thread
                 when (message.channel) {
                     Message.Channel.NOTIFICATION -> {
@@ -825,13 +800,13 @@ object MessageEngine {
                             message.id, reply
                         )
                         if (!sent) {
-                            Log.w(TAG, "Inline reply failed — falling back to SmsRouter")
-                            SmsRouter.send(message.sender, reply)
+                            Log.w(TAG, "Inline reply failed for ${message.sender} — Samsung Messages notification no longer active")
+                            notify("⚠️ Could not send reply to ${contact.name ?: message.sender} — Samsung Messages notification was dismissed")
                         }
                     }
-                    Message.Channel.SMS          -> SmsRouter.send(message.sender, reply)
-                    Message.Channel.EMAIL        -> EmailRouter.routeReply(message.sender, reply)
-                    else                         -> SmsRouter.send(message.sender, reply)
+                    Message.Channel.SMS   -> Log.w(TAG, "SMS channel message in handlePublicMessage — SmsAdapter removed, should not occur")
+                    Message.Channel.EMAIL -> EmailRouter.routeReply(message.sender, reply)
+                    else                  -> Log.w(TAG, "Unknown channel ${message.channel} — cannot send reply")
                 }
 
                 val sender = contact.name ?: message.sender
@@ -851,6 +826,6 @@ object MessageEngine {
     }
 
     fun sendReply(toNumber: String, body: String) {
-        SmsRouter.send(toNumber, body)
+        Log.w(TAG, "sendReply() called but SEND_SMS removed — cannot initiate to $toNumber")
     }
 }

@@ -5,9 +5,6 @@
         <package android:name="com.google.android.gms" />
     </queries>
 
-    <uses-permission android:name="android.permission.RECEIVE_SMS"/>
-    <uses-permission android:name="android.permission.SEND_SMS"/>
-    <uses-permission android:name="android.permission.READ_SMS"/>
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.READ_CONTACTS"/>
@@ -82,14 +79,6 @@
                 android:name="android.app.notification_listener_settings"
                 android:resource="@xml/notification_listener"/>
         </service>
-
-        <receiver android:name=".adapters.SmsAdapter"
-            android:exported="true"
-            android:permission="android.permission.BROADCAST_SMS">
-            <intent-filter android:priority="999">
-                <action android:name="android.provider.Telephony.SMS_RECEIVED"/>
-            </intent-filter>
-        </receiver>
 
         <!-- Boot receiver — restarts Aigentik after reboot -->
         <receiver android:name=".system.BootReceiver"

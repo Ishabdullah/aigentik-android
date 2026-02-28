@@ -17,7 +17,6 @@ import com.aigentik.app.core.ChatBridge
 import com.aigentik.app.email.EmailMonitor
 import com.aigentik.app.email.EmailRouter
 import com.aigentik.app.email.GmailHistoryClient
-import com.aigentik.app.sms.SmsRouter
 import com.aigentik.app.system.ConnectionWatchdog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -87,9 +86,6 @@ class AigentikService : Service() {
 
                 // Channel states
                 ChannelManager.loadFromSettings()
-
-                // SMS sending
-                SmsRouter.init(this@AigentikService)
 
                 // AI model
                 val modelPath = AigentikSettings.modelPath
