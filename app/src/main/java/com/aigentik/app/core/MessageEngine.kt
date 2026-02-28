@@ -16,7 +16,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-// MessageEngine v1.3
+// MessageEngine v1.4
+// v1.4: Room-backed per-contact conversation history for public message handling.
+//   Public messages (SMS, email) now include the last CONTEXT_WINDOW_TURNS turns
+//   as context when generating AI replies. This allows Aigentik to handle follow-up
+//   questions naturally ("What time does it start?" after "Are you coming tonight?").
+//
+//   Topic-drift prevention: if the last exchange with a contact was >SESSION_GAP_MS
+//   ago, history is treated as a new session and prior context is excluded.
+//   History trimmed to HISTORY_KEEP_COUNT turns per contact to bound DB growth.
+//
+//   NOTE: Admin command exchanges are NOT stored in conversation history —
+//   only public inbound messages and Aigentik's auto-replies are recorded.
 // v1.3: Gmail natural language actions — count, list, search, trash, mark read,
 //   mark spam, label, unsubscribe, empty trash. All destructive actions gated
 //   by DestructiveActionGuard requiring admin code confirmation.
@@ -38,6 +49,9 @@ object MessageEngine {
     // chatNotifier posts messages into Room DB so they appear in chat history
     var chatNotifier: ((String) -> Unit)? = null
 
+    // Conversation history DAO — initialized from configure() context
+    private var historyDao: ConversationHistoryDao? = null
+
     fun configure(
         context: Context,
         adminNumber: String,
@@ -52,6 +66,7 @@ object MessageEngine {
         this.agentName     = agentName
         this.ownerNotifier = ownerNotifier
         this.wakeLock      = wakeLock
+        historyDao         = ConversationHistoryDatabase.getInstance(context).historyDao()
         AiEngine.configure(agentName, ownerName)
         Log.i(TAG, "$agentName MessageEngine configured")
     }
@@ -248,6 +263,25 @@ object MessageEngine {
                     val target = result.target ?: return
                     ContactEngine.setInstructions(target, null, ContactEngine.ReplyBehavior.ALWAYS)
                     notify("✅ Will always auto-reply to $target.")
+                }
+
+                "set_contact_instructions" -> {
+                    val target = result.target ?: run {
+                        notify("Who should I set instructions for? Try: \"always reply formally to [name]\"")
+                        return
+                    }
+                    val instructions = result.content ?: run {
+                        notify("What instructions should I follow for $target?")
+                        return
+                    }
+                    val contact = ContactEngine.findContact(target)
+                        ?: ContactEngine.findByRelationship(target)
+                    if (contact != null) {
+                        ContactEngine.setInstructions(target, instructions, null)
+                        notify("✅ Instructions set for ${contact.name ?: target}:\n\"$instructions\"")
+                    } else {
+                        notify("Contact \"$target\" not found. Try 'find $target' first.")
+                    }
                 }
 
                 "status" -> {
@@ -659,6 +693,65 @@ object MessageEngine {
         }
     }
 
+    // Normalized contact key for conversation history lookups
+    // Phone-based messages: use last 10 digits. Email-based: use email lowercase.
+    private fun historyKey(message: Message): String {
+        return if (message.channel == Message.Channel.EMAIL) {
+            message.sender.lowercase()
+        } else {
+            message.sender.filter { it.isDigit() }.takeLast(10)
+        }
+    }
+
+    // Load conversation history for this contact+channel.
+    // Returns formatted history lines (oldest first) or empty list if:
+    //   - No history exists
+    //   - Last exchange was >SESSION_GAP_MS ago (new session / topic drift)
+    private fun loadHistory(contactKey: String, channel: String): List<String> {
+        val dao = historyDao ?: return emptyList()
+        try {
+            // Check session gap — if last turn was too long ago, treat as new session
+            val lastTs = dao.getLastTimestamp(contactKey, channel) ?: return emptyList()
+            val sessionGap = System.currentTimeMillis() - lastTs
+            if (sessionGap > ConversationHistoryDatabase.SESSION_GAP_MS) {
+                Log.d(TAG, "Session gap ${sessionGap/60000}min for $contactKey — using fresh context")
+                return emptyList()
+            }
+
+            // Load recent turns within the context window
+            val turns = dao.getSince(
+                contactKey = contactKey,
+                channel    = channel,
+                sinceMs    = lastTs - ConversationHistoryDatabase.SESSION_GAP_MS,
+                limit      = ConversationHistoryDatabase.CONTEXT_WINDOW_TURNS
+            )
+            return turns.map { turn ->
+                val label = if (turn.role == "user") "Them" else agentName
+                "$label: ${turn.content.take(200)}"
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to load history for $contactKey: ${e.message}")
+            return emptyList()
+        }
+    }
+
+    // Record a turn in conversation history and trim if needed
+    private fun recordHistory(contactKey: String, channel: String, role: String, content: String) {
+        val dao = historyDao ?: return
+        try {
+            dao.insert(ConversationTurn(
+                contactKey = contactKey,
+                channel    = channel,
+                role       = role,
+                content    = content.take(1000) // Cap at 1000 chars per turn
+            ))
+            // Trim to keep DB size bounded
+            dao.trimHistory(contactKey, channel, ConversationHistoryDatabase.HISTORY_KEEP_COUNT)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to record history: ${e.message}")
+        }
+    }
+
     private suspend fun handlePublicMessage(message: Message) {
         Log.i(TAG, "Public message from ${message.sender} via ${message.channel}")
         try {
@@ -686,26 +779,40 @@ object MessageEngine {
             }
 
             if (shouldAutoReply) {
+                // Load conversation history for context (empty if new session)
+                val contactKey = historyKey(message)
+                val channelName = message.channel.name
+                val history = loadHistory(contactKey, channelName)
+
+                // Record the incoming message in history
+                recordHistory(contactKey, channelName, "user", message.body)
+
                 // Use email-appropriate reply for EMAIL channel (longer, more professional)
                 // SMS/NOTIFICATION get the concise SMS generator
                 val reply = if (message.channel == Message.Channel.EMAIL) {
                     AiEngine.generateEmailReply(
-                        fromName     = message.senderName,
-                        fromEmail    = message.sender,
-                        subject      = message.subject ?: "Email",
-                        body         = message.body,
-                        relationship = contact.relationship,
-                        instructions = contact.instructions
+                        fromName             = message.senderName,
+                        fromEmail            = message.sender,
+                        subject              = message.subject ?: "Email",
+                        body                 = message.body,
+                        relationship         = contact.relationship,
+                        instructions         = contact.instructions,
+                        conversationHistory  = history
                     )
                 } else {
                     AiEngine.generateSmsReply(
-                        senderName   = message.senderName ?: contact.name,
-                        senderPhone  = message.sender,
-                        message      = message.body,
-                        relationship = contact.relationship,
-                        instructions = contact.instructions
+                        senderName           = message.senderName ?: contact.name,
+                        senderPhone          = message.sender,
+                        message              = message.body,
+                        relationship         = contact.relationship,
+                        instructions         = contact.instructions,
+                        conversationHistory  = history
                     )
                 }
+
+                // Record Aigentik's reply in history (strip signature for cleaner context)
+                val replyForHistory = reply.substringBefore("\n\n—").substringBefore("\n\n---").trim()
+                recordHistory(contactKey, channelName, "assistant", replyForHistory)
 
                 // Route by channel
                 // NOTIFICATION = RCS/SMS via inline reply (no SEND_SMS needed)

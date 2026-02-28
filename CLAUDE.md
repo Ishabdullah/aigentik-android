@@ -5,7 +5,7 @@ You are continuing development of Aigentik — a privacy-first Android AI assist
 ## PROJECT OVERVIEW
 - App: Aigentik Android (com.aigentik.app)
 - Repo: ~/aigentik-android (local Termux) + GitHub (builds via Actions)
-- **Current version: v1.4.5 (versionCode 55)**
+- **Current version: v1.4.6 (versionCode 56)**
 - Developer environment: Samsung S24 Ultra, Termux only — NO Android Studio, NO local Gradle builds
 - All builds happen via GitHub Actions → APK downloaded and sideloaded
 
@@ -81,6 +81,15 @@ These policies are non-negotiable. Claude MUST refuse any implementation that vi
 - `core/MessageDeduplicator.kt` — SMS/notification dedup
 - `core/PhoneNormalizer.kt` — E.164 phone formatting
 - `core/ChatBridge.kt` — service→Room DB bridge (posts assistant responses to chat)
+- `core/ContactEntity.kt` — Room entity for Contact (v1.4.6+)
+- `core/ContactDao.kt` — DAO for Contact Room operations
+- `core/ContactDatabase.kt` — Room database singleton (contact_database)
+- `core/RuleEntity.kt` — Room entity for Rule (v1.4.6+)
+- `core/RuleDao.kt` — DAO for Rule Room operations
+- `core/RuleDatabase.kt` — Room database singleton (rule_database)
+- `core/ConversationTurn.kt` — Room entity for per-contact conversation history
+- `core/ConversationHistoryDao.kt` — DAO for conversation history operations
+- `core/ConversationHistoryDatabase.kt` — Room DB singleton (conversation_history_database)
 - `auth/GoogleAuthManager.kt` — OAuth2 manager (v1.7)
 - `auth/AdminAuthManager.kt` — remote admin auth (30-min sessions)
 - `auth/DestructiveActionGuard.kt` — two-step confirmation for Gmail destructive actions
@@ -97,7 +106,9 @@ These policies are non-negotiable. Claude MUST refuse any implementation that vi
 - `ui/ChatActivity.kt` — chat interface (v1.0 — routes through MessageEngine, not standalone LLM)
 - `ui/SettingsActivity.kt` — settings + Google sign-in
 - `ui/OnboardingActivity.kt` — first run setup
-- `ui/ModelManagerActivity.kt` — model download/load
+- `ui/ModelManagerActivity.kt` — model download/load/switch (lists all downloaded .gguf)
+- `ui/RuleManagerActivity.kt` — GUI for managing SMS + email routing rules
+- `ui/AiDiagnosticActivity.kt` — native lib status, model info, inference benchmark
 - `chat/ChatDatabase.kt` — Room database singleton
 - `chat/ChatMessage.kt` — Room entity
 - `chat/ChatDao.kt` — Room DAO
@@ -113,7 +124,41 @@ These policies are non-negotiable. Claude MUST refuse any implementation that vi
 
 ## CHANGE LOG
 
-### v1.4.5 — Fix chat crash (current, 2026-02-27)
+### v1.4.6 — Full review implementation (current, 2026-02-28)
+Implemented all items from aigentik-android-review.md (Gemini CLI review):
+
+1. **Temperature + top-p sampling** — `llama_jni.cpp` and `LlamaJNI.kt`: SMS/email replies
+   use temperature=0.7/topP=0.9 for natural varied output; interpretCommand() uses
+   temperature=0.0 (greedy) for reliable JSON action parsing.
+2. **ConnectionWatchdog notification** — posts high-priority "Sign-in Required" notification
+   when OAuth token expires; taps to SettingsActivity; auto-dismisses on recovery.
+3. **Room migration: ContactEngine** — `contacts.json` → `ContactDatabase` (Room/SQLite).
+   One-time migration on first launch. ContactEntity + ContactDao + ContactDatabase added.
+4. **Room migration: RuleEngine** — `sms_rules.json` + `email_rules.json` → `RuleDatabase`.
+   One-time migration. RuleEntity + RuleDao + RuleDatabase added.
+5. **Contextual memory** — Room-backed per-contact conversation history for SMS + email channels.
+   2-hour session gap resets context (topic drift prevention). Trimmed to 20 turns/contact.
+   ConversationTurn + ConversationHistoryDao + ConversationHistoryDatabase added.
+6. **Rule Manager UI** — new `RuleManagerActivity` + layout. Add/delete SMS and email rules
+   with condition type and action selectors. Accessible from Settings.
+7. **AI Diagnostic screen** — new `AiDiagnosticActivity` + layout. Shows native lib status,
+   model info, runs benchmark, shows tokens/sec and sample output.
+8. **Downloaded Models list** — `ModelManagerActivity` lists all .gguf files in modelsDir
+   with Load button per non-active model. Allows switching models without re-downloading.
+9. **Contact instructions via chat** — "always reply formally to John" now wired via
+   `set_contact_instructions` action through AiEngine → MessageEngine → ContactEngine.setInstructions().
+10. **Backup exclusion rules** — `backup_rules.xml` + `data_extraction_rules.xml` prevent
+    contacts.json, rules/, models/, and all databases from being backed up to Google/cloud.
+11. **DestructiveActionGuard improvements** — common word exclusion list prevents accidental
+    confirmation when common English words appear in confirmation message.
+12. **MessageDeduplicator improvement** — fingerprint body window 50 → 100 chars.
+13. **Native lib error state** — `LlamaJNI.isNativeLibLoaded()` + `AiEngine.getStateLabel()`
+    now shows "Native lib error" vs "Not loaded" for better diagnostics.
+14. **Version bump**: versionCode 56, versionName 1.4.6
+
+- Build: versionCode 56, versionName 1.4.6
+
+### v1.4.5 — Fix chat crash (2026-02-27)
 Fixed three bugs in ChatActivity that caused crashes and silent response failures when using chat:
 
 1. **`CoroutineScope` without `SupervisorJob`** — Plain `Job()` means any exception in one child
@@ -388,18 +433,25 @@ Fixed keystore SHA-1 resolves ApiException code 10.
 
 ## KNOWN ISSUES / NEXT TASKS
 
-1. **Google Sign-In** — needs end-to-end test with v1.4.5 APK to confirm ApiException code 10 is gone
+1. **Google Sign-In** — needs end-to-end test with v1.4.6 APK to confirm ApiException code 10 is gone
 2. **chatNotifier race** — if AigentikService starts after ChatActivity sets chatNotifier,
    service overwrites with the same lambda. This is fine but worth monitoring if behavior diverges.
 3. **ContactEngine double-init** — ContactEngine.init() called from both AigentikService and
-   ChatActivity. Second call re-syncs Android contacts, which is harmless but slightly wasteful.
-   Low priority.
+   ChatActivity. Second call re-syncs Android contacts (and re-runs migrateFromJsonIfNeeded,
+   which is a no-op after first migration). Harmless but slightly wasteful. Low priority.
 4. **MessageEngine.appContext null if service never ran** — Gmail ops show "not initialized" in chat
    if AigentikService hasn't started yet. Could add MessageEngine.initContext(ctx) for ChatActivity
    to call, so Gmail works in chat even before first service start.
-5. **Per-contact instruction setting via chat** — "always reply formally to John" not yet wired
-   as a natural language command (ContactEngine.setInstructions exists, just not hooked up in NL)
-6. **Multi-model hot-swap** — only one model can be loaded at a time
+5. **Per-contact instruction setting via chat** — FIXED in v1.4.6: "always reply formally to John"
+   now wired via set_contact_instructions action in AiEngine + MessageEngine.
+6. **Multi-model hot-swap** — IMPROVED in v1.4.6: ModelManagerActivity lists all downloaded models
+   with Load button per model. One model loaded at a time (model swap requires full reload ~15-30s).
+7. **Conversation history in chat** — ConversationHistoryDatabase only populated for public
+   messages (SMS/email). Chat (admin) messages not stored in history. If desired in future,
+   add history for CHAT channel in handleAdminCommand() general conversation branch.
+8. **ConnectionWatchdog session restore delay** — after re-signing-in, the "Sign-in Required"
+   notification won't dismiss until the next 30-min watchdog check. Could add an immediate
+   check after sign-in success in SettingsActivity.
 
 ---
 

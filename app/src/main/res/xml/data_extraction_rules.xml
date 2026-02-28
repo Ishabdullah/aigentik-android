@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Data extraction rules for Android 12+ (API 31+).
+    Controls both cloud backup (Google One Backup) and device-to-device
+    transfers (e.g. device restore via cable).
+    Privacy policy: all contact data, message history, and rule sets must
+    stay on-device. Cloud backup of personal data is not permitted.
+-->
+<data-extraction-rules>
+
+    <cloud-backup>
+        <!-- Block cloud backup of all sensitive on-device data -->
+        <exclude domain="file" path="contacts.json"/>
+        <exclude domain="file" path="rules"/>
+        <exclude domain="file" path="models"/>
+        <exclude domain="database" path="chat_database"/>
+        <exclude domain="database" path="contact_database"/>
+        <exclude domain="database" path="rule_database"/>
+        <exclude domain="database" path="conversation_history_database"/>
+        <exclude domain="sharedpref" path="google_sign_in"/>
+    </cloud-backup>
+
+    <device-transfer>
+        <!--
+            Device-to-device transfer (e.g. restoring to new phone):
+            Allow basic settings and model path (user preference) but
+            exclude all data that contains personal information.
+        -->
+        <exclude domain="file" path="contacts.json"/>
+        <exclude domain="file" path="rules"/>
+        <exclude domain="file" path="models"/>
+        <exclude domain="database" path="chat_database"/>
+        <exclude domain="database" path="contact_database"/>
+        <exclude domain="database" path="rule_database"/>
+        <exclude domain="database" path="conversation_history_database"/>
+        <exclude domain="sharedpref" path="google_sign_in"/>
+    </device-transfer>
+
+</data-extraction-rules>

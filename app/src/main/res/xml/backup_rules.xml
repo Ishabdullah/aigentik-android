@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Backup exclusion rules for Android < 12 (API < 31).
+    Prevents sensitive on-device data from being uploaded to Google Backup.
+    Privacy policy: all contact data, message history, and rule sets must
+    stay on-device. Only non-sensitive app preferences may be backed up.
+
+    Excluded:
+      - contacts.json  : contact names, phones, emails (PII)
+      - rules/         : SMS and email routing rules (behavioral data)
+      - chat_database  : chat message history (private conversation data)
+-->
+<full-backup-content>
+    <!-- Contact intelligence database — contains names, phones, emails, instructions -->
+    <exclude domain="file" path="contacts.json"/>
+
+    <!-- Routing rules — SMS and email behavioral rules -->
+    <exclude domain="file" path="rules"/>
+
+    <!-- AI model files — large binaries, no need to back up -->
+    <exclude domain="file" path="models"/>
+
+    <!-- Chat message history Room database -->
+    <exclude domain="database" path="chat_database"/>
+    <exclude domain="database" path="contact_database"/>
+    <exclude domain="database" path="rule_database"/>
+    <exclude domain="database" path="conversation_history_database"/>
+
+    <!-- Shared prefs may contain OAuth tokens — exclude for safety -->
+    <exclude domain="sharedpref" path="google_sign_in"/>
+</full-backup-content>

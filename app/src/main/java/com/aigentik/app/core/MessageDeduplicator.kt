@@ -1,6 +1,9 @@
 package com.aigentik.app.core
 
-// MessageDeduplicator v1.1
+// MessageDeduplicator v1.2
+// v1.2: Fingerprint body window increased 50 → 100 chars.
+//   Reduces false deduplication for long messages that share identical
+//   headers/prefixes (e.g. multi-part messages from the same sender).
 // v1.1: TTL-based dedup — timestamp removed from fingerprint to handle
 //   SMS broadcast vs notification timing gap (can span a minute boundary).
 //   Self-reply prevention via markSent/wasSentRecently: tracks Aigentik's own
@@ -23,7 +26,7 @@ object MessageDeduplicator {
     // timestamps that happen to span a minute boundary.
     fun fingerprint(sender: String, body: String): String {
         val normalizedSender = sender.filter { it.isDigit() }.takeLast(10)
-        return "${normalizedSender}_${body.trim().take(50)}"
+        return "${normalizedSender}_${body.trim().take(100)}"
     }
 
     // Legacy overload — timestamp ignored, kept for SmsAdapter message ID compat

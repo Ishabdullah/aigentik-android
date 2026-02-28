@@ -4,8 +4,13 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-// AiEngine v1.1
-// Changes from v0.9.1:
+// AiEngine v1.2
+// v1.2: Temperature + top-p sampling for all AI generation calls.
+//   - SMS/email replies use temperature=0.7, topP=0.9 (natural, varied)
+//   - interpretCommand() uses temperature=0.0 (greedy) for deterministic JSON
+//   - getStateLabel() now shows "Native lib error" when .so failed to load,
+//     distinct from "Not loaded" (model not yet selected)
+// v1.1 Changes:
 //   - warmUp() called after load — primes JIT and KV cache so first reply is fast
 //   - WARMING state added — dashboard shows loading progress accurately
 //   - SMS max tokens 200 → 256, email 400 → 512 (uses 8k context properly)
@@ -60,7 +65,7 @@ object AiEngine {
         try {
             Log.i(TAG, "Warming up...")
             val prompt = llama.buildChatPrompt("You are a helpful assistant.", "Hello")
-            val result = llama.generate(prompt, 4)
+            val result = llama.generate(prompt, 4, temperature = 0.7f, topP = 0.9f)
             Log.i(TAG, "Warm-up done — ${result.length} chars")
         } catch (e: Exception) {
             // Non-fatal — model still works, first call just slower
@@ -72,21 +77,26 @@ object AiEngine {
 
     fun getModelInfo(): String = if (llama.isLoaded()) llama.getModelInfo() else "Not loaded"
 
-    fun getStateLabel(): String = when (state) {
-        State.NOT_LOADED -> "Not loaded"
-        State.LOADING    -> "Loading..."
-        State.WARMING    -> "Warming up..."
-        State.READY      -> "Ready"
-        State.ERROR      -> "Error"
+    fun getStateLabel(): String = when {
+        !llama.isNativeLibLoaded()   -> "Native lib error"
+        state == State.NOT_LOADED    -> "Not loaded"
+        state == State.LOADING       -> "Loading..."
+        state == State.WARMING       -> "Warming up..."
+        state == State.READY         -> "Ready"
+        else                         -> "Error"
     }
 
     // Generate SMS reply — 256 tokens
+    // conversationHistory: list of prior turns in chronological order (oldest first)
+    //   Each entry is "User: <msg>" or "Assistant: <reply>".
+    //   Pass empty list for stateless replies (default behavior).
     suspend fun generateSmsReply(
         senderName: String?,
         senderPhone: String,
         message: String,
         relationship: String?,
-        instructions: String?
+        instructions: String?,
+        conversationHistory: List<String> = emptyList()
     ): String = withContext(Dispatchers.IO) {
         val signature = "\n\n— $agentName, personal agent of $ownerName. " +
             "If you need to reach $ownerName urgently, " +
@@ -104,22 +114,34 @@ object AiEngine {
             "Be concise and natural — this is a text message. " +
             "Do NOT add a signature. Reply with message text only."
 
-        val prompt = llama.buildChatPrompt(systemMsg,
-            "Reply to: \"$message\" from ${senderName ?: senderPhone}")
-        val reply = llama.generate(prompt, 256).trim()
+        // Build user turn: prepend conversation history if present
+        val userTurn = buildString {
+            if (conversationHistory.isNotEmpty()) {
+                appendLine("Previous conversation:")
+                conversationHistory.forEach { appendLine(it) }
+                appendLine("---")
+            }
+            append("Reply to: \"$message\" from ${senderName ?: senderPhone}")
+        }
+
+        val prompt = llama.buildChatPrompt(systemMsg, userTurn)
+        // temperature=0.7 + topP=0.9: natural, varied SMS replies
+        val reply = llama.generate(prompt, 256, temperature = 0.7f, topP = 0.9f).trim()
 
         if (reply.isEmpty()) fallbackSmsReply(senderName, senderPhone) + signature
         else reply + signature
     }
 
     // Generate email reply — 512 tokens, up to 2000 char body
+    // conversationHistory: prior turns in this email thread (chronological, oldest first)
     suspend fun generateEmailReply(
         fromName: String?,
         fromEmail: String,
         subject: String,
         body: String,
         relationship: String?,
-        instructions: String?
+        instructions: String?,
+        conversationHistory: List<String> = emptyList()
     ): String = withContext(Dispatchers.IO) {
         val signature = "\n\n---\n$agentName | Personal Agent of $ownerName\n" +
             "For urgent matters include \"$ownerName\" in your subject."
@@ -134,9 +156,18 @@ object AiEngine {
             (instructions?.let { "IMPORTANT: $it. " } ?: "") +
             "Be professional and natural. Do NOT add a signature."
 
-        val prompt = llama.buildChatPrompt(systemMsg,
-            "Subject: $subject\nBody: ${body.take(2000)}\n\nWrite a reply.")
-        val reply = llama.generate(prompt, 512).trim()
+        val userTurn = buildString {
+            if (conversationHistory.isNotEmpty()) {
+                appendLine("Previous thread context:")
+                conversationHistory.forEach { appendLine(it) }
+                appendLine("---")
+            }
+            append("Subject: $subject\nBody: ${body.take(2000)}\n\nWrite a reply.")
+        }
+
+        val prompt = llama.buildChatPrompt(systemMsg, userTurn)
+        // temperature=0.7 + topP=0.9: professional but not robotic email replies
+        val reply = llama.generate(prompt, 512, temperature = 0.7f, topP = 0.9f).trim()
 
         if (reply.isEmpty()) fallbackEmailReply(fromName, fromEmail) + signature
         else reply + signature
@@ -152,7 +183,7 @@ object AiEngine {
                 "{\"action\":\"string\",\"target\":\"string or null\",\"content\":\"string or null\",\"query\":\"string or null\"} " +
                 "The 'query' field is a Gmail search string (e.g. \"from:amazon is:unread\"). " +
                 "Actions: send_sms, send_email, find_contact, get_contact_phone, " +
-                "never_reply_to, always_reply_to, " +
+                "never_reply_to, always_reply_to, set_contact_instructions, " +
                 "gmail_count_unread, gmail_list_unread, gmail_search, " +
                 "gmail_trash, gmail_trash_all, gmail_mark_read, gmail_mark_read_all, " +
                 "gmail_mark_spam, gmail_label, gmail_unsubscribe, gmail_empty_trash, " +
@@ -173,11 +204,15 @@ object AiEngine {
                 "\"unsubscribe from newsletters.com\" -> {\"action\":\"gmail_unsubscribe\",\"target\":\"newsletters.com\",\"content\":null,\"query\":\"from:newsletters.com\"} " +
                 "\"empty trash\" -> {\"action\":\"gmail_empty_trash\",\"target\":null,\"content\":null,\"query\":null} " +
                 "\"text mom I'll be late\" -> {\"action\":\"send_sms\",\"target\":\"mom\",\"content\":\"I'll be late\",\"query\":null} " +
-                "\"what's Sarah's number\" -> {\"action\":\"get_contact_phone\",\"target\":\"Sarah\",\"content\":null,\"query\":null}"
+                "\"what's Sarah's number\" -> {\"action\":\"get_contact_phone\",\"target\":\"Sarah\",\"content\":null,\"query\":null} " +
+                "\"always reply formally to John\" -> {\"action\":\"set_contact_instructions\",\"target\":\"John\",\"content\":\"always reply formally\",\"query\":null} " +
+                "\"when texting Mom be casual\" -> {\"action\":\"set_contact_instructions\",\"target\":\"Mom\",\"content\":\"be casual and friendly\",\"query\":null}"
 
             val prompt = llama.buildChatPrompt(systemMsg, "Command: \"$commandText\"")
             try {
-                val raw = llama.generate(prompt, 120).trim()
+                // temperature=0.0 → greedy for deterministic JSON output
+                // Command parsing needs reliability over creativity
+                val raw = llama.generate(prompt, 120, temperature = 0.0f, topP = 1.0f).trim()
                 val clean = raw.replace(Regex("```json|```|<\\|im_end\\|>.*"), "").trim()
                 parseCommandJson(clean)
             } catch (e: Exception) {
@@ -247,9 +282,21 @@ object AiEngine {
             lower.contains("never reply") ->
                 CommandResult("never_reply_to",
                     lower.substringAfter("never reply to ").trim(), null, false)
-            lower.contains("always reply") ->
+            lower.contains("always reply") && !lower.contains("formally") &&
+                !lower.contains("casually") && !lower.contains("briefly") ->
                 CommandResult("always_reply_to",
                     lower.substringAfter("always reply to ").trim(), null, false)
+            // Contact instructions — "always reply formally to X", "when texting X be Y"
+            (lower.contains("reply") || lower.contains("texting") || lower.contains("respond")) &&
+                (lower.contains("formally") || lower.contains("casually") ||
+                 lower.contains("briefly") || lower.contains("professionally") ||
+                 lower.contains("friendly") || lower.contains("short") ||
+                 lower.contains("long") || lower.contains("formal")) -> {
+                // Extract name — heuristic: word after "to" or "for" or last word before instruction
+                val name = Regex("(?:to|for|with)\\s+(\\w+)").find(lower)?.groupValues?.get(1)
+                    ?: lower.replace(Regex("always|reply|formally|casually|briefly|professionally|friendly|short|long|formal|texting|respond|when|be|to|for|with"), "").trim()
+                CommandResult("set_contact_instructions", name.ifEmpty { null }, lower, false)
+            }
             lower == "status" || lower == "check status" ->
                 CommandResult("status", null, null, false)
             lower.contains("sync") && lower.contains("contact") ->

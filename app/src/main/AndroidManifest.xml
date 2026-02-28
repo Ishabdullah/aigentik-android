@@ -24,6 +24,8 @@
 
     <application
         android:allowBackup="true"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -50,6 +52,21 @@
         <activity android:name=".ui.SettingsActivity"
             android:exported="false" android:label="Settings"/>
 
+        <activity android:name=".ui.RuleManagerActivity"
+            android:exported="false" android:label="Rule Manager"/>
+
+        <activity android:name=".ui.AiDiagnosticActivity"
+            android:exported="false" android:label="AI Diagnostic"/>
+
+        <!--
+            foregroundServiceType="dataSync" is appropriate because AigentikService
+            performs network operations (Gmail OAuth2 REST API calls) in the background.
+            NOTE for future: Android may require "specialUse" for on-device AI inference
+            workloads on future API levels. If Play Store distribution is ever added,
+            review this type declaration against current Play policy and add a
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" .../> entry.
+            For sideloaded deployment this is not required.
+        -->
         <service android:name=".core.AigentikService"
             android:exported="false"
             android:foregroundServiceType="dataSync"/>

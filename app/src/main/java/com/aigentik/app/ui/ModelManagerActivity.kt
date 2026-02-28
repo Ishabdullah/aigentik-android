@@ -26,11 +26,13 @@ import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 
-// ModelManagerActivity v0.9.2
-// Handles model download from URL or loading from local file
-// Can be launched from onboarding (showSkip=true) or settings (showSkip=false)
-// NOTE: Downloads saved to app private storage — survives app updates
-// NOTE: Large models (2.5GB) require stable WiFi — warn user if on mobile data
+// ModelManagerActivity v0.9.3
+// v0.9.3: Shows all downloaded GGUF files in modelsDir with "Load" button per file.
+//   Allows switching between multiple downloaded models without re-downloading.
+// v0.9.2: Handles model download from URL or loading from local file.
+//   Can be launched from onboarding (showSkip=true) or settings (showSkip=false).
+//   Downloads saved to app private storage — survives app updates.
+//   Large models (2.5GB) require stable WiFi — warn user if on mobile data.
 class ModelManagerActivity : AppCompatActivity() {
 
     companion object {
@@ -71,6 +73,7 @@ class ModelManagerActivity : AppCompatActivity() {
 
         // Update status with current model if loaded
         updateCurrentModelCard()
+        updateDownloadedModelsList()
 
         // Download button
         findViewById<Button>(R.id.btnDownload).setOnClickListener {
@@ -230,6 +233,7 @@ class ModelManagerActivity : AppCompatActivity() {
             // Save model path to settings
             AigentikSettings.modelPath = path
             updateCurrentModelCard()
+            updateDownloadedModelsList()
             showStatus("✅ Model loaded! ${AiEngine.getModelInfo()}")
             hideProgress()
 
@@ -241,6 +245,66 @@ class ModelManagerActivity : AppCompatActivity() {
         } else {
             showStatus("❌ Failed to load model — file may be corrupt")
             hideProgress()
+        }
+    }
+
+    // Show all downloaded .gguf files in modelsDir with a "Load" button per file
+    private fun updateDownloadedModelsList() {
+        val container = findViewById<LinearLayout>(R.id.layoutDownloadedModels) ?: return
+        container.removeAllViews()
+
+        val ggufFiles = modelsDir.listFiles { f -> f.name.endsWith(".gguf") }
+            ?.sortedByDescending { it.lastModified() }
+            ?: emptyList()
+
+        if (ggufFiles.isEmpty()) {
+            val tv = android.widget.TextView(this).apply {
+                text = "No downloaded models found."
+                textSize = 13f
+                setTextColor(0xFF888888.toInt())
+            }
+            container.addView(tv)
+            return
+        }
+
+        val currentPath = AigentikSettings.modelPath
+        for (file in ggufFiles) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(0, 8, 0, 8)
+            }
+
+            // Model name + size
+            val sizeMb = file.length() / (1024 * 1024)
+            val isActive = file.absolutePath == currentPath
+            val tv = android.widget.TextView(this).apply {
+                text = "${if (isActive) "▶ " else ""}${file.name}\n${sizeMb} MB"
+                textSize = 12f
+                setTextColor(if (isActive) 0xFF00FF88.toInt() else 0xFFCCCCCC.toInt())
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            row.addView(tv)
+
+            // Load button (hidden for currently active model)
+            if (!isActive) {
+                val btn = android.widget.Button(this).apply {
+                    text = "Load"
+                    textSize = 12f
+                    setTextColor(0xFF000000.toInt())
+                    backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF00FF88.toInt())
+                    layoutParams = LinearLayout.LayoutParams(
+                        android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                        android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+                    )
+                    setOnClickListener {
+                        scope.launch { loadModelFile(file.absolutePath) }
+                        updateDownloadedModelsList()
+                    }
+                }
+                row.addView(btn)
+            }
+
+            container.addView(row)
         }
     }
 

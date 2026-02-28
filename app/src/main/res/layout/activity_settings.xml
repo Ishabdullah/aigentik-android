@@ -203,6 +203,22 @@
             android:backgroundTint="#0F1824"
             android:layout_marginBottom="8dp"/>
 
+        <Button android:id="@+id/btnManageRules"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="📋 Manage Rules"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#0F1824"
+            android:layout_marginBottom="8dp"/>
+
+        <Button android:id="@+id/btnAiDiagnostic"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="🧪 AI Diagnostic"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#0F1824"
+            android:layout_marginBottom="16dp"/>
+
         <Button android:id="@+id/btnResetSetup"
             android:layout_width="match_parent"
             android:layout_height="48dp"

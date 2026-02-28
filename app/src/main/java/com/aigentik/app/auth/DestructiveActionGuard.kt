@@ -2,7 +2,14 @@ package com.aigentik.app.auth
 
 import android.util.Log
 
-// DestructiveActionGuard v1.0
+// DestructiveActionGuard v1.1
+// v1.1: Filter common English words from password candidate tokens.
+//   Reduces accidental confirmation risk when the password happens to be a
+//   common word (e.g. "yes", "done", "okay"). Common words are excluded from
+//   the word-by-word password check; the user's actual code word will still
+//   be tried if it isn't in the exclusion list. Admin codes should be unique
+//   words or numbers (e.g. "skyfall7", "1984", "xQ9r") — not common nouns.
+//
 // Intercepts destructive commands and holds them pending password confirmation
 //
 // Flow:
@@ -29,6 +36,19 @@ object DestructiveActionGuard {
 
     // One pending action per channel
     private val pendingActions = mutableMapOf<String, PendingAction>()
+
+    // Common English words unlikely to be admin codes.
+    // These are excluded from word-by-word password matching to reduce
+    // accidental confirmation when a message like "yes please delete" is sent.
+    // NOTE: If the user's admin code IS one of these words, they should change it.
+    private val COMMON_WORD_EXCLUSIONS = setOf(
+        "yes", "no", "ok", "okay", "sure", "please", "done", "just",
+        "delete", "confirm", "cancel", "stop", "go", "do", "the",
+        "and", "or", "it", "that", "this", "with", "from", "to",
+        "move", "trash", "spam", "empty", "all", "mark", "read",
+        "my", "your", "their", "our", "its", "me", "him", "her",
+        "would", "could", "should", "will", "can", "may", "might"
+    )
 
     // Store a pending destructive action awaiting password confirmation
     fun storePending(channelKey: String, command: String, onConfirmed: suspend () -> String) {
@@ -61,9 +81,13 @@ object DestructiveActionGuard {
         val action = pendingActions[channelKey]
             ?: return "⚠️ No pending action found or it has expired."
 
-        // Try each whitespace-separated token as the admin code
+        // Try each whitespace-separated token as the admin code.
+        // Tokens in the common-word exclusion list are skipped — they are
+        // unlikely to be actual admin codes and would increase accidental
+        // confirmation risk (e.g. "yes delete" matching password "delete").
         val tokens = rawInput.trim().split(Regex("\\s+"))
-        val verified = tokens.any { token -> AdminAuthManager.verifyPassword(token) }
+        val candidates = tokens.filter { it.lowercase() !in COMMON_WORD_EXCLUSIONS }
+        val verified = candidates.any { token -> AdminAuthManager.verifyPassword(token) }
 
         return if (verified) {
             pendingActions.remove(channelKey)

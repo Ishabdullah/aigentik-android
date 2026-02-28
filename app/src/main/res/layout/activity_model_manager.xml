@@ -66,6 +66,32 @@
                 android:layout_marginTop="4dp"/>
         </LinearLayout>
 
+        <!-- Downloaded Models section -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/card_background"
+            android:padding="16dp"
+            android:layout_marginBottom="16dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="DOWNLOADED MODELS"
+                android:textColor="#555555"
+                android:textSize="11sp"
+                android:layout_marginBottom="8dp"/>
+
+            <!-- Populated dynamically by ModelManagerActivity -->
+            <LinearLayout
+                android:id="@+id/layoutDownloadedModels"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"/>
+
+        </LinearLayout>
+
         <!-- Download section -->
         <LinearLayout
             android:layout_width="match_parent"

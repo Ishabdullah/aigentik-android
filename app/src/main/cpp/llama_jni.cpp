@@ -1,5 +1,16 @@
-// llama_jni.cpp v1.1
-// Changes from v0.9.5:
+// llama_jni.cpp v1.2
+// v1.2: Temperature + top-p (nucleus) sampling replaces greedy sampler.
+//   - temperature=0.7f + top-p=0.9f produces more natural, varied responses
+//   - temperature=0.0f special-cased to use greedy for deterministic output
+//     (used by interpretCommand() for reliable JSON action parsing)
+//   - Sampler chain: temp → top_p → dist (random draw from filtered distribution)
+//   - KV cache reset before every generation still applies (stateless per-call)
+//   NOTE on KV cache reset: resetting before every call ensures a clean state but
+//   discards "prefill" speed from a cached system prompt. If the system prompt is
+//   large (>1k tokens), consider implementing prompt caching by keeping the KV
+//   state from the last system-prompt tokenization. Not implemented here because
+//   the per-message context window varies; this is a future optimization.
+// v1.1 Changes:
 //   - n_ctx 2048 → 8192 (full 8k context)
 //   - n_threads / n_threads_batch 4 → 6 (Snapdragon 8 Gen 3 perf cores)
 //   - KV cache quantized to Q8_0 — ~4x memory savings vs F16
@@ -81,7 +92,8 @@ Java_com_aigentik_app_ai_LlamaJNI_nativeLoadModel(
 extern "C"
 JNIEXPORT jstring JNICALL
 Java_com_aigentik_app_ai_LlamaJNI_nativeGenerate(
-        JNIEnv* env, jobject, jstring promptStr, jint maxTokens) {
+        JNIEnv* env, jobject, jstring promptStr, jint maxTokens,
+        jfloat temperature, jfloat topP) {
 
     std::lock_guard<std::mutex> lock(g_mutex);
 
@@ -113,9 +125,24 @@ Java_com_aigentik_app_ai_LlamaJNI_nativeGenerate(
         return env->NewStringUTF("Prompt too long for context window.");
     }
 
+    // Build sampler chain based on temperature:
+    //   temperature == 0.0 → greedy (deterministic, used for command parsing)
+    //   temperature  > 0.0 → temp → top_p → dist (stochastic, better for conversation)
+    // This produces more natural, less repetitive responses than pure greedy.
     llama_sampler_chain_params sparams = llama_sampler_chain_default_params();
     llama_sampler* sampler = llama_sampler_chain_init(sparams);
-    llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
+    if (temperature <= 0.0f) {
+        // Greedy: always pick the highest-probability token
+        llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
+    } else {
+        // Temperature scaling: soften or sharpen the probability distribution
+        llama_sampler_chain_add(sampler, llama_sampler_init_temp(temperature));
+        // Top-p (nucleus): keep only tokens whose cumulative probability ≤ topP
+        // min_keep=1 ensures at least one token is always sampled
+        llama_sampler_chain_add(sampler, llama_sampler_init_top_p(topP, 1));
+        // Dist: random draw weighted by remaining token probabilities
+        llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
+    }
 
     // Size batch to max(prompt_tokens, N_BATCH) — handles large prompts safely
     int batch_sz = (n > N_BATCH) ? n : N_BATCH;

@@ -16,11 +16,12 @@ import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInStatusCodes
 import com.google.android.gms.common.api.ApiException
 
-// SettingsActivity v2.0
-// - Replaced app password with Sign in with Google (OAuth2)
-// - Added admin password setup (SHA-256 hashed, stored in EncryptedSharedPreferences)
-// - Shows signed-in Google account email
-// - Sign out clears OAuth session
+// SettingsActivity v2.1
+// v2.1: Added buttons to RuleManagerActivity and AiDiagnosticActivity.
+// v2.0: Replaced app password with Sign in with Google (OAuth2).
+//   Added admin password setup (SHA-256 hashed, stored in EncryptedSharedPreferences).
+//   Shows signed-in Google account email.
+//   Sign out clears OAuth session.
 class SettingsActivity : AppCompatActivity() {
 
     private val RC_SIGN_IN = 9001
@@ -123,6 +124,14 @@ class SettingsActivity : AppCompatActivity() {
 
         btnManageModel?.setOnClickListener {
             startActivity(Intent(this, ModelManagerActivity::class.java))
+        }
+
+        findViewById<Button>(R.id.btnManageRules)?.setOnClickListener {
+            startActivity(Intent(this, RuleManagerActivity::class.java))
+        }
+
+        findViewById<Button>(R.id.btnAiDiagnostic)?.setOnClickListener {
+            startActivity(Intent(this, AiDiagnosticActivity::class.java))
         }
 
         btnReset.setOnClickListener {

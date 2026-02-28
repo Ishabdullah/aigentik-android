@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#080C14">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="🧪 AI Diagnostic"
+            android:textSize="22sp"
+            android:textColor="#00D4FF"
+            android:layout_marginBottom="4dp"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Test native library, model loading, and inference speed."
+            android:textColor="#7BA7CC"
+            android:textSize="12sp"
+            android:layout_marginBottom="20dp"/>
+
+        <!-- Native Library Status -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Native Library"
+            android:textColor="#00D4FF"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="4dp"/>
+
+        <TextView android:id="@+id/tvNativeLibStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Checking..."
+            android:textColor="#7BA7CC"
+            android:textSize="13sp"
+            android:layout_marginBottom="16dp"/>
+
+        <!-- Model Status -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Model"
+            android:textColor="#00D4FF"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="4dp"/>
+
+        <TextView android:id="@+id/tvModelStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Checking..."
+            android:textColor="#7BA7CC"
+            android:textSize="13sp"
+            android:layout_marginBottom="4dp"/>
+
+        <TextView android:id="@+id/tvModelInfo"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textColor="#556677"
+            android:textSize="11sp"
+            android:fontFamily="monospace"
+            android:layout_marginBottom="16dp"/>
+
+        <!-- Inference Benchmark -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#1A2A3A"
+            android:layout_marginBottom="16dp"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Inference Speed Test"
+            android:textColor="#00D4FF"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="4dp"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Runs a short generation and measures tokens/second."
+            android:textColor="#7BA7CC"
+            android:textSize="12sp"
+            android:layout_marginBottom="12dp"/>
+
+        <Button android:id="@+id/btnRunBenchmark"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:text="▶ Run Benchmark"
+            android:textColor="#000000"
+            android:backgroundTint="#00D4FF"
+            android:layout_marginBottom="12dp"/>
+
+        <TextView android:id="@+id/tvBenchmarkResult"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textColor="#00FF88"
+            android:textSize="13sp"
+            android:fontFamily="monospace"
+            android:background="#0A1A0A"
+            android:padding="12dp"
+            android:layout_marginBottom="16dp"/>
+
+        <!-- Sample Output -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#1A2A3A"
+            android:layout_marginBottom="16dp"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Sample Output"
+            android:textColor="#00D4FF"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="4dp"/>
+
+        <TextView android:id="@+id/tvSampleOutput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="(Run benchmark to see sample output)"
+            android:textColor="#556677"
+            android:textSize="12sp"
+            android:fontFamily="monospace"
+            android:background="#0A0A1A"
+            android:padding="12dp"/>
+
+    </LinearLayout>
+</ScrollView>
