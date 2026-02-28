@@ -24,6 +24,7 @@ object AigentikSettings {
     private const val KEY_ADMIN_PASS_HASH   = "admin_password_hash"
     private const val KEY_ADMIN_USERNAME    = "admin_username"
     private const val KEY_OAUTH_SIGNED_IN   = "oauth_signed_in"
+    private const val KEY_THEME_MODE        = "theme_mode" // 0: system, 1: light, 2: dark
 
     private lateinit var prefs: SharedPreferences
 
@@ -65,6 +66,10 @@ object AigentikSettings {
     var isOAuthSignedIn: Boolean
         get() = prefs.getBoolean(KEY_OAUTH_SIGNED_IN, false)
         set(value) = prefs.edit().putBoolean(KEY_OAUTH_SIGNED_IN, value).apply()
+
+    var themeMode: Int
+        get() = prefs.getInt(KEY_THEME_MODE, 0)
+        set(value) = prefs.edit().putInt(KEY_THEME_MODE, value).apply()
 
     var gmailAddress: String
         get() = prefs.getString(KEY_GMAIL_ADDRESS, "") ?: ""

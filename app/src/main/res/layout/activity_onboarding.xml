@@ -3,7 +3,7 @@
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#080C14">
+    android:background="?android:attr/windowBackground">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -15,28 +15,39 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="🤖 Welcome to Aigentik"
-            android:textSize="26sp"
-            android:textColor="#00D4FF"
+            android:text="Welcome to Aigentik"
+            android:textSize="28sp"
+            android:textStyle="bold"
+            android:textColor="?android:attr/textColorPrimary"
             android:layout_gravity="center"
-            android:layout_marginBottom="8dp"/>
+            android:layout_marginBottom="8dp"
+            android:layout_marginTop="32dp"/>
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Your private on-device AI assistant"
-            android:textSize="14sp"
-            android:textColor="#7BA7CC"
+            android:textSize="15sp"
+            android:textColor="?android:attr/textColorSecondary"
             android:layout_gravity="center"
-            android:layout_marginBottom="32dp"/>
+            android:layout_marginBottom="48dp"/>
 
-        <!-- Agent Name -->
+        <!-- Profile Section -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="PROFILE"
+            android:textColor="@color/accent"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="12dp"/>
+
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="AI Assistant Name"
-            android:textColor="#7BA7CC"
-            android:textSize="13sp"
+            android:textColor="?android:attr/textColorSecondary"
+            android:textSize="12sp"
             android:layout_marginBottom="4dp"/>
         <EditText
             android:id="@+id/etAgentName"
@@ -44,109 +55,82 @@
             android:layout_height="wrap_content"
             android:hint="e.g. Aigentik"
             android:text="Aigentik"
-            android:textColor="#FFFFFF"
-            android:textColorHint="#334455"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textColorHint="?android:attr/textColorSecondary"
             android:background="@drawable/input_background"
             android:padding="12dp"
             android:layout_marginBottom="16dp"
-            android:inputType="text"/>
+            android:inputType="text"
+            android:textSize="15sp"/>
 
-        <!-- Owner Name -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Your Name"
-            android:textColor="#7BA7CC"
-            android:textSize="13sp"
+            android:textColor="?android:attr/textColorSecondary"
+            android:textSize="12sp"
             android:layout_marginBottom="4dp"/>
         <EditText
             android:id="@+id/etOwnerName"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:hint="e.g. Ish"
-            android:textColor="#FFFFFF"
-            android:textColorHint="#334455"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textColorHint="?android:attr/textColorSecondary"
             android:background="@drawable/input_background"
             android:padding="12dp"
             android:layout_marginBottom="16dp"
-            android:inputType="text"/>
+            android:inputType="text"
+            android:textSize="15sp"/>
 
-        <!-- Admin Phone -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Your Phone Number (Admin)"
-            android:textColor="#7BA7CC"
-            android:textSize="13sp"
-            android:layout_marginBottom="4dp"/>
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Your personal number — identifies your commands"
-            android:textColor="#334455"
-            android:textSize="11sp"
+            android:textColor="?android:attr/textColorSecondary"
+            android:textSize="12sp"
             android:layout_marginBottom="4dp"/>
         <EditText
             android:id="@+id/etAdminNumber"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:hint="+15551234567"
-            android:textColor="#FFFFFF"
-            android:textColorHint="#334455"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textColorHint="?android:attr/textColorSecondary"
             android:background="@drawable/input_background"
             android:padding="12dp"
             android:layout_marginBottom="16dp"
-            android:inputType="phone"/>
+            android:inputType="phone"
+            android:textSize="15sp"/>
 
-        <!-- GVoice Number -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Aigentik's Google Voice Number"
-            android:textColor="#7BA7CC"
-            android:textSize="13sp"
-            android:layout_marginBottom="4dp"/>
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="The number people text to reach Aigentik"
-            android:textColor="#334455"
-            android:textSize="11sp"
+            android:textColor="?android:attr/textColorSecondary"
+            android:textSize="12sp"
             android:layout_marginBottom="4dp"/>
         <EditText
             android:id="@+id/etAigentikNumber"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:hint="+15559876543"
-            android:textColor="#FFFFFF"
-            android:textColorHint="#334455"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textColorHint="?android:attr/textColorSecondary"
             android:background="@drawable/input_background"
             android:padding="12dp"
-            android:layout_marginBottom="24dp"
-            android:inputType="phone"/>
+            android:layout_marginBottom="32dp"
+            android:inputType="phone"
+            android:textSize="15sp"/>
 
-        <!-- Divider -->
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="#1A2A3A"
-            android:layout_marginBottom="20dp"/>
-
-        <!-- Google Account -->
+        <!-- Google Account Section -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Google Account"
-            android:textColor="#00D4FF"
-            android:textSize="15sp"
+            android:text="GOOGLE ACCOUNT"
+            android:textColor="@color/accent"
+            android:textSize="11sp"
             android:textStyle="bold"
-            android:layout_marginBottom="4dp"/>
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Required for Gmail and Google Voice features"
-            android:textColor="#7BA7CC"
-            android:textSize="12sp"
             android:layout_marginBottom="12dp"/>
 
         <TextView
@@ -154,7 +138,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Not signed in"
-            android:textColor="#7BA7CC"
+            android:textColor="?android:attr/textColorSecondary"
             android:textSize="13sp"
             android:layout_marginBottom="12dp"/>
 
@@ -163,36 +147,21 @@
             android:layout_width="match_parent"
             android:layout_height="52dp"
             android:text="Sign in with Google"
-            android:textColor="#FFFFFF"
-            android:backgroundTint="#1A73E8"
-            android:layout_marginBottom="24dp"/>
-
-        <!-- Divider -->
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="#1A2A3A"
-            android:layout_marginBottom="20dp"/>
+            android:textColor="@color/onPrimary"
+            android:backgroundTint="@color/primary"
+            android:layout_marginBottom="48dp"/>
 
         <!-- Start button -->
         <Button
             android:id="@+id/btnSetup"
             android:layout_width="match_parent"
             android:layout_height="56dp"
-            android:text="Start Aigentik"
+            android:text="Create Account"
             android:textSize="16sp"
-            android:textColor="#000000"
-            android:backgroundTint="#00D4FF"
-            android:layout_marginBottom="8dp"/>
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="You can sign in to Google later in Settings"
-            android:textColor="#334455"
-            android:textSize="11sp"
-            android:layout_gravity="center"
-            android:layout_marginBottom="8dp"/>
+            android:textStyle="bold"
+            android:textColor="@color/onPrimary"
+            android:backgroundTint="@color/primary"
+            android:layout_marginBottom="12dp"/>
 
         <TextView
             android:id="@+id/tvStatus"

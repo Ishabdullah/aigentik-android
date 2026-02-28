@@ -42,8 +42,9 @@ class AiDiagnosticActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_ai_diagnostic)
         AigentikSettings.init(this)
+        ThemeHelper.applySavedTheme()
+        setContentView(R.layout.activity_ai_diagnostic)
 
         tvNativeLibStatus    = findViewById(R.id.tvNativeLibStatus)
         tvModelStatus        = findViewById(R.id.tvModelStatus)

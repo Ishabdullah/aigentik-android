@@ -53,6 +53,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AigentikSettings.init(this)
+        ThemeHelper.applySavedTheme()
 
         if (!AigentikSettings.isConfigured) {
             startActivity(Intent(this, OnboardingActivity::class.java))
@@ -60,9 +61,9 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        setContentView(R.layout.activity_main)
-        setupDashboard()
-        checkPermissionsAndStart()
+        // If configured, default to Chat screen
+        startActivity(Intent(this, ChatActivity::class.java))
+        finish()
     }
 
     override fun onResume() {

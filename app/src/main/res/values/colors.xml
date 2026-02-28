@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Common Colors -->
+    <color name="primary">#000000</color>
+    <color name="onPrimary">#FFFFFF</color>
+    <color name="accent">#00FF88</color>
+    <color name="accent_muted">#00CC66</color>
+
+    <!-- Dark Palette (Neutral) -->
+    <color name="bg_dark">#0A0A0A</color>
+    <color name="surface_dark">#121212</color>
+    <color name="onSurface_dark">#EEEEEE</color>
+    <color name="onSurfaceVariant_dark">#888888</color>
+    <color name="border_dark">#222222</color>
+    <color name="bubble_user_dark">#1E1E1E</color>
+    <color name="bubble_assistant_dark">#121212</color>
+
+    <!-- Light Palette (Neutral) -->
+    <color name="bg_light">#FFFFFF</color>
+    <color name="surface_light">#F8F9FA</color>
+    <color name="onSurface_light">#1A1A1A</color>
+    <color name="onSurfaceVariant_light">#666666</color>
+    <color name="border_light">#E0E0E0</color>
+    <color name="bubble_user_light">#F1F3F4</color>
+    <color name="bubble_assistant_light">#FFFFFF</color>
+
+    <!-- Theme-aware aliases -->
+    <color name="bubble_user">@color/bubble_user_light</color>
+    <color name="bubble_assistant">@color/bubble_assistant_light</color>
+    <color name="bubble_stroke">@color/border_light</color>
+</resources>

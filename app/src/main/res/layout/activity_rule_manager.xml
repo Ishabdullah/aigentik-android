@@ -3,304 +3,257 @@
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#080C14">
+    android:background="?android:attr/windowBackground">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="16dp">
+        android:padding="20dp">
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="📋 Rule Manager"
-            android:textSize="22sp"
-            android:textColor="#00D4FF"
-            android:layout_marginBottom="4dp"/>
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Rules control how Aigentik handles incoming messages."
-            android:textColor="#7BA7CC"
-            android:textSize="12sp"
-            android:layout_marginBottom="20dp"/>
-
-        <!-- ── SMS Rules Section ── -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="💬 SMS Rules"
-            android:textColor="#00D4FF"
-            android:textSize="16sp"
+            android:text="Rule Manager"
+            android:textSize="24sp"
             android:textStyle="bold"
-            android:layout_marginBottom="8dp"/>
+            android:textColor="?android:attr/textColorPrimary"
+            android:layout_marginBottom="6dp"/>
 
-        <!-- SMS rule list (populated dynamically) -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Control how Aigentik handles incoming messages."
+            android:textColor="?android:attr/textColorSecondary"
+            android:textSize="13sp"
+            android:layout_marginBottom="24dp"/>
+
+        <!-- SMS Rules -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="SMS RULES"
+            android:textColor="@color/accent"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="12dp"/>
+
         <LinearLayout
             android:id="@+id/layoutSmsRules"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:layout_marginBottom="12dp"/>
+            android:layout_marginBottom="16dp"/>
 
         <!-- Add SMS Rule -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:background="#0F1824"
-            android:padding="12dp"
-            android:layout_marginBottom="16dp">
+            android:background="@drawable/bubble_assistant"
+            android:padding="16dp"
+            android:layout_marginBottom="24dp">
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Add SMS Rule"
-                android:textColor="#7BA7CC"
-                android:textSize="13sp"
-                android:layout_marginBottom="8dp"/>
+                android:text="New SMS Rule"
+                android:textColor="?android:attr/textColorPrimary"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="12dp"/>
 
             <EditText android:id="@+id/etSmsDescription"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:hint="Description (e.g. Block spam number)"
-                android:textColor="#FFFFFF"
-                android:textColorHint="#334455"
+                android:hint="Description (e.g. Block spam)"
+                android:textColor="?android:attr/textColorPrimary"
+                android:textColorHint="?android:attr/textColorSecondary"
                 android:background="@drawable/input_background"
-                android:padding="10dp"
-                android:layout_marginBottom="8dp"
-                android:inputType="text"/>
+                android:padding="12dp"
+                android:layout_marginBottom="12dp"
+                android:inputType="text"
+                android:textSize="14sp"/>
 
             <EditText android:id="@+id/etSmsConditionValue"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:hint="Phone number or keyword"
-                android:textColor="#FFFFFF"
-                android:textColorHint="#334455"
+                android:textColor="?android:attr/textColorPrimary"
+                android:textColorHint="?android:attr/textColorSecondary"
                 android:background="@drawable/input_background"
-                android:padding="10dp"
-                android:layout_marginBottom="8dp"
-                android:inputType="text"/>
-
-            <!-- Condition type -->
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Condition type:"
-                android:textColor="#7BA7CC"
-                android:textSize="12sp"
-                android:layout_marginBottom="4dp"/>
+                android:padding="12dp"
+                android:layout_marginBottom="12dp"
+                android:inputType="text"
+                android:textSize="14sp"/>
 
             <RadioGroup android:id="@+id/rgSmsConditionType"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:layout_marginBottom="8dp">
-
+                android:layout_marginBottom="12dp">
                 <RadioButton android:id="@+id/rbSmsFromNumber"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Phone"
-                    android:textColor="#FFFFFF"
+                    android:text="From Number"
+                    android:textSize="12sp"
                     android:checked="true"/>
                 <RadioButton android:id="@+id/rbSmsContains"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Contains"
-                    android:textColor="#FFFFFF"
+                    android:text="Contains Text"
+                    android:textSize="12sp"
                     android:layout_marginStart="16dp"/>
             </RadioGroup>
-
-            <!-- Action -->
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Action:"
-                android:textColor="#7BA7CC"
-                android:textSize="12sp"
-                android:layout_marginBottom="4dp"/>
 
             <RadioGroup android:id="@+id/rgSmsAction"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:layout_marginBottom="12dp">
-
+                android:layout_marginBottom="16dp">
                 <RadioButton android:id="@+id/rbSmsSpam"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Spam"
-                    android:textColor="#FF4444"
+                    android:textSize="12sp"
                     android:checked="true"/>
                 <RadioButton android:id="@+id/rbSmsAutoReply"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Auto-reply"
-                    android:textColor="#00FF88"
-                    android:layout_marginStart="16dp"/>
+                    android:textSize="12sp"
+                    android:layout_marginStart="8dp"/>
                 <RadioButton android:id="@+id/rbSmsReview"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Review"
-                    android:textColor="#FFAA00"
-                    android:layout_marginStart="16dp"/>
+                    android:textSize="12sp"
+                    android:layout_marginStart="8dp"/>
             </RadioGroup>
 
             <Button android:id="@+id/btnAddSmsRule"
                 android:layout_width="match_parent"
-                android:layout_height="44dp"
-                android:text="+ Add SMS Rule"
-                android:textColor="#000000"
-                android:backgroundTint="#00D4FF"/>
+                android:layout_height="48dp"
+                android:text="Add SMS Rule"
+                android:textColor="@color/onPrimary"
+                android:backgroundTint="@color/primary"/>
         </LinearLayout>
 
-        <!-- ── Email Rules Section ── -->
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="#1A2A3A"
-            android:layout_marginBottom="16dp"/>
-
+        <!-- Email Rules -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="📧 Email Rules"
-            android:textColor="#00D4FF"
-            android:textSize="16sp"
+            android:text="EMAIL RULES"
+            android:textColor="@color/accent"
+            android:textSize="11sp"
             android:textStyle="bold"
-            android:layout_marginBottom="8dp"/>
+            android:layout_marginBottom="12dp"/>
 
-        <!-- Email rule list (populated dynamically) -->
         <LinearLayout
             android:id="@+id/layoutEmailRules"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:layout_marginBottom="12dp"/>
+            android:layout_marginBottom="16dp"/>
 
         <!-- Add Email Rule -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:background="#0F1824"
-            android:padding="12dp"
-            android:layout_marginBottom="24dp">
+            android:background="@drawable/bubble_assistant"
+            android:padding="16dp"
+            android:layout_marginBottom="32dp">
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Add Email Rule"
-                android:textColor="#7BA7CC"
-                android:textSize="13sp"
-                android:layout_marginBottom="8dp"/>
+                android:text="New Email Rule"
+                android:textColor="?android:attr/textColorPrimary"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="12dp"/>
 
             <EditText android:id="@+id/etEmailDescription"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:hint="Description (e.g. Block newsletter domain)"
-                android:textColor="#FFFFFF"
-                android:textColorHint="#334455"
+                android:hint="Description"
+                android:textColor="?android:attr/textColorPrimary"
+                android:textColorHint="?android:attr/textColorSecondary"
                 android:background="@drawable/input_background"
-                android:padding="10dp"
-                android:layout_marginBottom="8dp"
-                android:inputType="text"/>
+                android:padding="12dp"
+                android:layout_marginBottom="12dp"
+                android:inputType="text"
+                android:textSize="14sp"/>
 
             <EditText android:id="@+id/etEmailConditionValue"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:hint="Sender email, domain, or keyword"
-                android:textColor="#FFFFFF"
-                android:textColorHint="#334455"
+                android:hint="Email, domain, or keyword"
+                android:textColor="?android:attr/textColorPrimary"
+                android:textColorHint="?android:attr/textColorSecondary"
                 android:background="@drawable/input_background"
-                android:padding="10dp"
-                android:layout_marginBottom="8dp"
-                android:inputType="text"/>
-
-            <!-- Condition type -->
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Condition type:"
-                android:textColor="#7BA7CC"
-                android:textSize="12sp"
-                android:layout_marginBottom="4dp"/>
+                android:padding="12dp"
+                android:layout_marginBottom="12dp"
+                android:inputType="text"
+                android:textSize="14sp"/>
 
             <RadioGroup android:id="@+id/rgEmailConditionType"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:layout_marginBottom="8dp">
-
+                android:layout_marginBottom="12dp">
                 <RadioButton android:id="@+id/rbEmailFrom"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="From"
-                    android:textColor="#FFFFFF"
+                    android:textSize="12sp"
                     android:checked="true"/>
                 <RadioButton android:id="@+id/rbEmailDomain"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Domain"
-                    android:textColor="#FFFFFF"
-                    android:layout_marginStart="12dp"/>
+                    android:textSize="12sp"
+                    android:layout_marginStart="8dp"/>
                 <RadioButton android:id="@+id/rbEmailSubject"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Subject"
-                    android:textColor="#FFFFFF"
-                    android:layout_marginStart="12dp"/>
-                <RadioButton android:id="@+id/rbEmailPromo"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Promo"
-                    android:textColor="#FFFFFF"
-                    android:layout_marginStart="12dp"/>
+                    android:textSize="12sp"
+                    android:layout_marginStart="8dp"/>
             </RadioGroup>
-
-            <!-- Action -->
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Action:"
-                android:textColor="#7BA7CC"
-                android:textSize="12sp"
-                android:layout_marginBottom="4dp"/>
 
             <RadioGroup android:id="@+id/rgEmailAction"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:layout_marginBottom="12dp">
-
+                android:layout_marginBottom="16dp">
                 <RadioButton android:id="@+id/rbEmailSpam"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Spam"
-                    android:textColor="#FF4444"
+                    android:textSize="12sp"
                     android:checked="true"/>
                 <RadioButton android:id="@+id/rbEmailAutoReply"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Auto-reply"
-                    android:textColor="#00FF88"
-                    android:layout_marginStart="16dp"/>
+                    android:textSize="12sp"
+                    android:layout_marginStart="8dp"/>
                 <RadioButton android:id="@+id/rbEmailReview"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Review"
-                    android:textColor="#FFAA00"
-                    android:layout_marginStart="16dp"/>
+                    android:textSize="12sp"
+                    android:layout_marginStart="8dp"/>
             </RadioGroup>
 
             <Button android:id="@+id/btnAddEmailRule"
                 android:layout_width="match_parent"
-                android:layout_height="44dp"
-                android:text="+ Add Email Rule"
-                android:textColor="#000000"
-                android:backgroundTint="#00D4FF"/>
+                android:layout_height="48dp"
+                android:text="Add Email Rule"
+                android:textColor="@color/onPrimary"
+                android:backgroundTint="@color/primary"/>
         </LinearLayout>
 
         <!-- Status message -->
@@ -310,7 +263,8 @@
             android:text=""
             android:textSize="13sp"
             android:layout_gravity="center"
-            android:layout_marginBottom="16dp"/>
+            android:layout_marginBottom="32dp"
+            android:textColor="@color/accent"/>
 
     </LinearLayout>
 </ScrollView>

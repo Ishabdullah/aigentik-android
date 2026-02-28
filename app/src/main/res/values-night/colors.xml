@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Common Colors (Remain same or adapted for dark) -->
+    <color name="primary">#FFFFFF</color>
+    <color name="onPrimary">#000000</color>
+
+    <!-- Theme Aware Palette -->
+    <color name="bubble_user">#1E1E1E</color>
+    <color name="bubble_assistant">#0A0A0A</color>
+    <color name="bubble_stroke">#222222</color>
+</resources>

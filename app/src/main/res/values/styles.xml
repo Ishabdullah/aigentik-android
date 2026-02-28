@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Chat Bubbles -->
+    <style name="ChatBubble">
+        <item name="android:padding">12dp</item>
+        <item name="android:layout_margin">4dp</item>
+    </style>
+
+    <style name="ChatBubble.User">
+        <item name="android:background">@drawable/bubble_user</item>
+        <item name="android:layout_gravity">end</item>
+        <item name="android:textColor">@color/onPrimary</item>
+    </style>
+
+    <style name="ChatBubble.Assistant">
+        <item name="android:background">@drawable/bubble_assistant</item>
+        <item name="android:layout_gravity">start</item>
+        <item name="android:textColor">?android:attr/textColorPrimary</item>
+    </style>
+</resources>

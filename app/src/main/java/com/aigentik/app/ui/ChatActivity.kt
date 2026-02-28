@@ -1,22 +1,32 @@
 package com.aigentik.app.ui
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
-import android.widget.Button
 import android.widget.EditText
+import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import androidx.core.view.GravityCompat
 import androidx.core.widget.NestedScrollView
+import androidx.drawerlayout.widget.DrawerLayout
+import com.aigentik.app.BuildConfig
 import com.aigentik.app.R
 import com.aigentik.app.ai.AiEngine
 import com.aigentik.app.chat.ChatDatabase
 import com.aigentik.app.chat.ChatMessage
+import com.aigentik.app.core.AigentikService
 import com.aigentik.app.core.AigentikSettings
 import com.aigentik.app.core.ContactEngine
 import com.aigentik.app.core.Message
 import com.aigentik.app.core.MessageEngine
+import com.google.android.material.navigation.NavigationView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -29,13 +39,18 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// ChatActivity v1.0 — routes all commands through MessageEngine
-// Previously had its own generateResponse() that bypassed MessageEngine entirely,
-// so Gmail/SMS/contacts tools were never reachable from chat.
-// Now: simple commands (status/pause/find/help) resolved locally for speed,
-// everything else routed to MessageEngine.onMessageReceived(CHAT channel).
-// Responses come back via ChatBridge → Room DB → collectLatest → UI.
 class ChatActivity : AppCompatActivity() {
+
+    companion object {
+        private val REQUIRED_PERMISSIONS = arrayOf(
+            Manifest.permission.RECEIVE_SMS,
+            Manifest.permission.SEND_SMS,
+            Manifest.permission.READ_SMS,
+            Manifest.permission.READ_CONTACTS,
+            Manifest.permission.POST_NOTIFICATIONS
+        )
+        private const val PERMISSION_REQUEST_CODE  = 100
+    }
 
     // SupervisorJob — exceptions in one child coroutine don't cascade to others
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -49,7 +64,9 @@ class ChatActivity : AppCompatActivity() {
     private lateinit var tvThinking: TextView
     private lateinit var tvModelIndicator: TextView
     private lateinit var tvModelLabel: TextView
-    private lateinit var btnSend: Button
+    private lateinit var btnSend: ImageButton
+    private lateinit var drawerLayout: DrawerLayout
+    private lateinit var navView: NavigationView
 
     // True while waiting for MessageEngine to post a response via ChatBridge
     private var awaitingResponse = false
@@ -68,6 +85,8 @@ class ChatActivity : AppCompatActivity() {
         // ContactEngine needed for status/find local commands
         ContactEngine.init(applicationContext)
 
+        drawerLayout     = findViewById(R.id.drawerLayout)
+        navView          = findViewById(R.id.navView)
         messageContainer = findViewById(R.id.messageContainer)
         scrollView        = findViewById(R.id.scrollView)
         etMessage         = findViewById(R.id.etMessage)
@@ -77,18 +96,85 @@ class ChatActivity : AppCompatActivity() {
         tvModelLabel      = findViewById(R.id.tvModelLabel)
         btnSend           = findViewById(R.id.btnSend)
 
-        findViewById<TextView>(R.id.tvChatTitle).text =
-            "Chat with ${AigentikSettings.agentName}"
-        findViewById<Button>(R.id.btnBack).setOnClickListener { finish() }
+        val agentName = AigentikSettings.agentName
+        findViewById<TextView>(R.id.tvChatTitle).text = agentName
+
+        findViewById<ImageButton>(R.id.btnMenu).setOnClickListener {
+            drawerLayout.openDrawer(GravityCompat.START)
+        }
+
+        setupNavigation()
+        updateDrawerHeader()
         btnSend.setOnClickListener { sendMessage() }
 
         updateModelStatus()
         observeMessages()
 
+        checkPermissionsAndStart()
+
         scope.launch {
             val count = withContext(Dispatchers.IO) { db.chatDao().getCount() }
             if (count == 0) insertWelcome()
         }
+    }
+
+    private fun checkPermissionsAndStart() {
+        val missing = REQUIRED_PERMISSIONS.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isNotEmpty()) {
+            ActivityCompat.requestPermissions(
+                this, missing.toTypedArray(), PERMISSION_REQUEST_CODE)
+        } else {
+            startAigentik()
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == PERMISSION_REQUEST_CODE) startAigentik()
+    }
+
+    private fun startAigentik() {
+        startForegroundService(Intent(this, AigentikService::class.java))
+        updateModelStatus()
+    }
+
+    private fun setupNavigation() {
+        navView.setNavigationItemSelectedListener { menuItem ->
+            drawerLayout.closeDrawer(GravityCompat.START)
+            when (menuItem.itemId) {
+                R.id.nav_chat -> { /* Already here */ }
+                R.id.nav_model -> startActivity(Intent(this, ModelManagerActivity::class.java))
+                R.id.nav_rules -> startActivity(Intent(this, RuleManagerActivity::class.java))
+                R.id.nav_channels -> {
+                    // Start SettingsActivity but maybe with a specific scroll position?
+                    // For now just open settings
+                    startActivity(Intent(this, SettingsActivity::class.java))
+                }
+                R.id.nav_diagnostic -> startActivity(Intent(this, AiDiagnosticActivity::class.java))
+                R.id.nav_settings -> startActivity(Intent(this, SettingsActivity::class.java))
+                R.id.nav_about -> {
+                    val version = BuildConfig.VERSION_NAME
+                    androidx.appcompat.app.AlertDialog.Builder(this)
+                        .setTitle("Aigentik")
+                        .setMessage("Version $version\n\nPrivacy-first on-device AI assistant.")
+                        .setPositiveButton("OK", null)
+                        .show()
+                }
+            }
+            true
+        }
+    }
+
+    private fun updateDrawerHeader() {
+        val header = navView.getHeaderView(0)
+        header.findViewById<TextView>(R.id.tvDrawerAgentName).text = AigentikSettings.agentName
+        header.findViewById<TextView>(R.id.tvDrawerVersion).text = "v${BuildConfig.VERSION_NAME}"
     }
 
     private fun sendMessage() {

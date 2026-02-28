@@ -6,6 +6,8 @@ import android.os.Bundle
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.aigentik.app.R
@@ -47,6 +49,7 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var btnGoogleSignIn: Button
     private lateinit var btnGoogleSignOut: Button
     private lateinit var btnGrantGmailPerms: Button
+    private lateinit var rgTheme: RadioGroup
     private lateinit var tvStatus: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -58,24 +61,34 @@ class SettingsActivity : AppCompatActivity() {
         etOwnerName            = findViewById(R.id.etOwnerName)
         etAdminNumber          = findViewById(R.id.etAdminNumber)
         etAigentikNumber       = findViewById(R.id.etAigentikNumber)
-        etAdminPassword        = findViewById(R.id.etAdminPassword)
-        etAdminPasswordConfirm = findViewById(R.id.etAdminPasswordConfirm)
         tvGoogleAccountStatus  = findViewById(R.id.tvGoogleAccountStatus)
-        tvGmailScopeStatus     = findViewById(R.id.tvGmailScopeStatus)
         btnGoogleSignIn        = findViewById(R.id.btnGoogleSignIn)
         btnGoogleSignOut       = findViewById(R.id.btnGoogleSignOut)
-        btnGrantGmailPerms     = findViewById(R.id.btnGrantGmailPerms)
+        rgTheme                = findViewById(R.id.rgTheme)
         tvStatus               = findViewById(R.id.tvSaveStatus)
-
-        val btnSave        = findViewById<Button>(R.id.btnSave)
-        val btnReset       = findViewById<Button>(R.id.btnResetSetup)
-        val btnManageModel = findViewById<Button>(R.id.btnManageModel)
 
         // Load saved values
         etAgentName.setText(AigentikSettings.agentName)
         etOwnerName.setText(AigentikSettings.ownerName)
         etAdminNumber.setText(AigentikSettings.adminNumber)
         etAigentikNumber.setText(AigentikSettings.aigentikNumber)
+
+        // Load theme selection
+        when (AigentikSettings.themeMode) {
+            1 -> findViewById<RadioButton>(R.id.rbThemeLight).isChecked = true
+            2 -> findViewById<RadioButton>(R.id.rbThemeDark).isChecked = true
+            else -> findViewById<RadioButton>(R.id.rbThemeSystem).isChecked = true
+        }
+
+        rgTheme.setOnCheckedChangeListener { _, checkedId ->
+            val mode = when (checkedId) {
+                R.id.rbThemeLight -> 1
+                R.id.rbThemeDark -> 2
+                else -> 0
+            }
+            AigentikSettings.themeMode = mode
+            ThemeHelper.applyTheme(mode)
+        }
 
         // Update Google account UI
         refreshGoogleAccountUI()

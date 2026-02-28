@@ -45,6 +45,7 @@ class OnboardingActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AigentikSettings.init(this)
+        ThemeHelper.applySavedTheme()
         setContentView(R.layout.activity_onboarding)
 
         tvStatus       = findViewById(R.id.tvStatus)

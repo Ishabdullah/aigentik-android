@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Aigentik" parent="Theme.MaterialComponents.DayNight.DarkActionBar">
-        <item name="colorPrimary">#00FF88</item>
-        <item name="colorPrimaryVariant">#00CC66</item>
-        <item name="colorOnPrimary">#000000</item>
+    <style name="Theme.Aigentik" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Main theme colors -->
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorOnPrimary">@color/onPrimary</item>
+        <item name="android:statusBarColor">?android:attr/windowBackground</item>
+        <item name="android:windowLightStatusBar">true</item>
     </style>
 </resources>

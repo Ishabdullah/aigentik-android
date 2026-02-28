@@ -41,6 +41,7 @@ class RuleManagerActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ThemeHelper.applySavedTheme()
         setContentView(R.layout.activity_rule_manager)
 
         layoutSmsRules   = findViewById(R.id.layoutSmsRules)

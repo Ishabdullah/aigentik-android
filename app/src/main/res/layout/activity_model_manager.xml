@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView
     xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#0A0A0A">
+    android:background="?android:attr/windowBackground">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -15,9 +16,10 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="🧠 AI Model"
-            android:textSize="22sp"
-            android:textColor="#00FF88"
+            android:text="AI Model"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:textColor="?android:attr/textColorPrimary"
             android:layout_marginBottom="6dp"/>
 
         <TextView
@@ -26,7 +28,7 @@
             android:layout_height="wrap_content"
             android:text="No model loaded"
             android:textSize="13sp"
-            android:textColor="#888888"
+            android:textColor="?android:attr/textColorSecondary"
             android:layout_marginBottom="24dp"/>
 
         <!-- Current model card -->
@@ -35,7 +37,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:background="@drawable/card_background"
+            android:background="@drawable/bubble_assistant"
             android:padding="16dp"
             android:layout_marginBottom="16dp"
             android:visibility="gone">
@@ -43,9 +45,10 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="LOADED MODEL"
-                android:textColor="#555555"
+                android:text="ACTIVE MODEL"
+                android:textColor="@color/accent"
                 android:textSize="11sp"
+                android:textStyle="bold"
                 android:layout_marginBottom="6dp"/>
 
             <TextView
@@ -53,194 +56,164 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text=""
-                android:textColor="#00FF88"
-                android:textSize="14sp"/>
+                android:textColor="?android:attr/textColorPrimary"
+                android:textSize="15sp"
+                android:textStyle="bold"/>
 
             <TextView
                 android:id="@+id/tvModelInfo"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text=""
-                android:textColor="#888888"
+                android:textColor="?android:attr/textColorSecondary"
                 android:textSize="12sp"
-                android:layout_marginTop="4dp"/>
+                android:layout_marginTop="4dp"
+                android:fontFamily="monospace"/>
         </LinearLayout>
 
         <!-- Downloaded Models section -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="LOCAL MODELS"
+            android:textColor="@color/accent"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="12dp"/>
+
         <LinearLayout
+            android:id="@+id/layoutDownloadedModels"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:background="@drawable/card_background"
-            android:padding="16dp"
-            android:layout_marginBottom="16dp">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="DOWNLOADED MODELS"
-                android:textColor="#555555"
-                android:textSize="11sp"
-                android:layout_marginBottom="8dp"/>
-
-            <!-- Populated dynamically by ModelManagerActivity -->
-            <LinearLayout
-                android:id="@+id/layoutDownloadedModels"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"/>
-
-        </LinearLayout>
+            android:layout_marginBottom="24dp"/>
 
         <!-- Download section -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="DOWNLOAD"
+            android:textColor="@color/accent"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="12dp"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Recommended: Qwen3-4B (2.5 GB)"
+            android:textColor="?android:attr/textColorSecondary"
+            android:textSize="13sp"
+            android:layout_marginBottom="8dp"/>
+
+        <EditText
+            android:id="@+id/etDownloadUrl"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textColorHint="?android:attr/textColorSecondary"
+            android:background="@drawable/input_background"
+            android:padding="12dp"
+            android:layout_marginBottom="12dp"
+            android:inputType="textUri"
+            android:textSize="14sp"/>
+
+        <Button
+            android:id="@+id/btnDownload"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:text="Download from URL"
+            android:textColor="@color/onPrimary"
+            android:backgroundTint="@color/primary"
+            android:layout_marginBottom="16dp"/>
+
+        <!-- Progress section -->
         <LinearLayout
+            android:id="@+id/layoutProgress"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:background="@drawable/card_background"
-            android:padding="16dp"
+            android:visibility="gone"
             android:layout_marginBottom="16dp">
 
             <TextView
+                android:id="@+id/tvDownloadStatus"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="DOWNLOAD MODEL"
-                android:textColor="#555555"
-                android:textSize="11sp"
+                android:text="Downloading..."
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="13sp"
+                android:layout_marginBottom="8dp"/>
+
+            <ProgressBar
+                android:id="@+id/progressDownload"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="8dp"
+                android:progressTint="@color/accent"
+                android:progressBackgroundTint="?android:attr/colorBackgroundFloating"
+                android:max="100"
+                android:progress="0"
                 android:layout_marginBottom="12dp"/>
 
-            <!-- Option 1: HuggingFace pre-filled -->
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Recommended: Qwen3-4B (2.5 GB)"
-                android:textColor="#CCCCCC"
-                android:textSize="13sp"
-                android:layout_marginBottom="4dp"/>
-
-            <EditText
-                android:id="@+id/etDownloadUrl"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textColor="#FFFFFF"
-                android:textColorHint="#555555"
-                android:hint="Model download URL"
-                android:background="@drawable/input_background"
-                android:padding="12dp"
-                android:layout_marginBottom="8dp"
-                android:inputType="textUri"
-                android:textSize="12sp"/>
-
             <Button
-                android:id="@+id/btnDownload"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:text="⬇ Download Model"
-                android:textColor="#000000"
-                android:backgroundTint="#00FF88"
-                android:layout_marginBottom="16dp"/>
-
-            <!-- Progress section -->
-            <LinearLayout
-                android:id="@+id/layoutProgress"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:visibility="gone">
-
-                <TextView
-                    android:id="@+id/tvDownloadStatus"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Downloading..."
-                    android:textColor="#AAAAAA"
-                    android:textSize="13sp"
-                    android:layout_marginBottom="8dp"/>
-
-                <ProgressBar
-                    android:id="@+id/progressDownload"
-                    style="?android:attr/progressBarStyleHorizontal"
-                    android:layout_width="match_parent"
-                    android:layout_height="8dp"
-                    android:progressTint="#00FF88"
-                    android:progressBackgroundTint="#222222"
-                    android:max="100"
-                    android:progress="0"
-                    android:layout_marginBottom="8dp"/>
-
-                <Button
-                    android:id="@+id/btnCancel"
-                    android:layout_width="wrap_content"
-                    android:layout_height="36dp"
-                    android:text="Cancel"
-                    android:textColor="#FF4444"
-                    android:backgroundTint="#1A0000"
-                    android:textSize="12sp"/>
-            </LinearLayout>
+                android:id="@+id/btnCancel"
+                android:layout_width="wrap_content"
+                android:layout_height="44dp"
+                android:text="Cancel Download"
+                android:textColor="#FF4444"
+                android:backgroundTint="?android:attr/colorBackgroundFloating"
+                android:textSize="13sp"/>
         </LinearLayout>
 
         <!-- Load from device section -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="IMPORT"
+            android:textColor="@color/accent"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="12dp"
+            android:layout_marginTop="8dp"/>
+
+        <EditText
+            android:id="@+id/etLocalPath"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textColorHint="?android:attr/textColorSecondary"
+            android:hint="e.g. /Downloads/model.gguf"
+            android:background="@drawable/input_background"
+            android:padding="12dp"
+            android:layout_marginBottom="12dp"
+            android:inputType="text"
+            android:textSize="14sp"/>
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:background="@drawable/card_background"
-            android:padding="16dp"
-            android:layout_marginBottom="16dp">
+            android:orientation="horizontal"
+            android:layout_marginBottom="32dp">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="LOAD FROM DEVICE"
-                android:textColor="#555555"
-                android:textSize="11sp"
-                android:layout_marginBottom="12dp"/>
+            <Button
+                android:id="@+id/btnBrowse"
+                android:layout_width="0dp"
+                android:layout_height="52dp"
+                android:layout_weight="1"
+                android:text="Browse Files"
+                android:textColor="?android:attr/textColorPrimary"
+                android:backgroundTint="?android:attr/colorBackgroundFloating"
+                android:layout_marginEnd="8dp"/>
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Already have a .gguf file on your phone?"
-                android:textColor="#AAAAAA"
-                android:textSize="13sp"
-                android:layout_marginBottom="8dp"/>
-
-            <EditText
-                android:id="@+id/etLocalPath"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textColor="#FFFFFF"
-                android:textColorHint="#555555"
-                android:hint="e.g. /storage/emulated/0/Download/model.gguf"
-                android:background="@drawable/input_background"
-                android:padding="12dp"
-                android:layout_marginBottom="8dp"
-                android:inputType="text"
-                android:textSize="12sp"/>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal">
-
-                <Button
-                    android:id="@+id/btnBrowse"
-                    android:layout_width="0dp"
-                    android:layout_height="44dp"
-                    android:layout_weight="1"
-                    android:text="Browse"
-                    android:textColor="#FFFFFF"
-                    android:backgroundTint="#222222"
-                    android:layout_marginEnd="8dp"/>
-
-                <Button
-                    android:id="@+id/btnLoadLocal"
-                    android:layout_width="0dp"
-                    android:layout_height="44dp"
-                    android:layout_weight="1"
-                    android:text="Load File"
-                    android:textColor="#000000"
-                    android:backgroundTint="#00FF88"/>
-            </LinearLayout>
+            <Button
+                android:id="@+id/btnLoadLocal"
+                android:layout_width="0dp"
+                android:layout_height="52dp"
+                android:layout_weight="1"
+                android:text="Load File"
+                android:textColor="@color/onPrimary"
+                android:backgroundTint="@color/primary"/>
         </LinearLayout>
 
         <!-- Skip / Continue button (onboarding only) -->
@@ -248,10 +221,11 @@
             android:id="@+id/btnSkip"
             android:layout_width="match_parent"
             android:layout_height="48dp"
-            android:text="Skip for now — use fallback replies"
-            android:textColor="#888888"
-            android:backgroundTint="#111111"
-            android:visibility="gone"/>
+            android:text="Skip (Use Fallback AI)"
+            android:textColor="?android:attr/textColorSecondary"
+            android:backgroundTint="?android:attr/colorBackgroundFloating"
+            android:visibility="gone"
+            android:layout_marginBottom="24dp"/>
 
     </LinearLayout>
 </ScrollView>
