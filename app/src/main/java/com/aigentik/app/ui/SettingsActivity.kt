@@ -61,11 +61,18 @@ class SettingsActivity : AppCompatActivity() {
         etOwnerName            = findViewById(R.id.etOwnerName)
         etAdminNumber          = findViewById(R.id.etAdminNumber)
         etAigentikNumber       = findViewById(R.id.etAigentikNumber)
+        etAdminPassword        = findViewById(R.id.etAdminPassword)
+        etAdminPasswordConfirm = findViewById(R.id.etAdminPasswordConfirm)
         tvGoogleAccountStatus  = findViewById(R.id.tvGoogleAccountStatus)
+        tvGmailScopeStatus     = findViewById(R.id.tvGmailScopeStatus)
         btnGoogleSignIn        = findViewById(R.id.btnGoogleSignIn)
         btnGoogleSignOut       = findViewById(R.id.btnGoogleSignOut)
+        btnGrantGmailPerms     = findViewById(R.id.btnGrantGmailPerms)
         rgTheme                = findViewById(R.id.rgTheme)
         tvStatus               = findViewById(R.id.tvSaveStatus)
+
+        val btnSave        = findViewById<Button>(R.id.btnSave)
+        val btnReset       = findViewById<Button>(R.id.btnResetSetup)
 
         // Load saved values
         etAgentName.setText(AigentikSettings.agentName)
