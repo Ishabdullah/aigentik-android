@@ -112,6 +112,8 @@ class OnboardingActivity : AppCompatActivity() {
                     refreshGoogleUI()
                     tvStatus?.setTextColor(0xFF00D4FF.toInt())
                     tvStatus?.text = "✅ Signed in as ${account.email}"
+                    // Auto-advance: if owner name + phone are filled, save and proceed
+                    tryAutoAdvance()
                 } else {
                     android.util.Log.e("Onboarding", "Sign-in failed: account is null")
                     tvStatus?.setTextColor(0xFFFFAA00.toInt())
@@ -134,6 +136,37 @@ class OnboardingActivity : AppCompatActivity() {
                 tvStatus?.text = "Google sign-in unexpected error: ${e.message}"
             }
         }
+    }
+
+    private fun tryAutoAdvance() {
+        val ownerName   = findViewById<EditText>(R.id.etOwnerName)?.text?.toString()?.trim().orEmpty()
+        val adminNumber = findViewById<EditText>(R.id.etAdminNumber)?.text?.toString()?.trim().orEmpty()
+
+        if (ownerName.isEmpty() || adminNumber.isEmpty()) {
+            tvStatus?.setTextColor(0xFFFFAA00.toInt())
+            tvStatus?.text = "Fill in your name and phone, then tap Get Started."
+            return
+        }
+
+        // Fields are filled and Google sign-in succeeded — save and proceed
+        val agentName      = findViewById<EditText>(R.id.etAgentName)
+            ?.text?.toString()?.trim().orEmpty().ifEmpty { "Aigentik" }
+        val aigentikNumber = findViewById<EditText>(R.id.etAigentikNumber)
+            ?.text?.toString()?.trim().orEmpty()
+        val gmailAddress   = com.aigentik.app.auth.GoogleAuthManager.getSignedInEmail(this) ?: ""
+
+        AigentikSettings.saveFromOnboarding(
+            agentName      = agentName,
+            ownerName      = ownerName,
+            adminNumber    = adminNumber,
+            aigentikNumber = aigentikNumber,
+            gmailAddress   = gmailAddress,
+            gmailAppPassword = ""
+        )
+
+        tvStatus?.setTextColor(0xFF00D4FF.toInt())
+        tvStatus?.text = "Saved — requesting permissions..."
+        requestStoragePermission()
     }
 
     private fun refreshGoogleUI() {

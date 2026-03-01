@@ -1,37 +1,3 @@
 <?xml version="1.0" encoding="utf-8"?>
-<menu xmlns:android="http://schemas.android.com/apk/res/android">
-    <group android:checkableBehavior="single">
-        <item
-            android:id="@+id/nav_chat"
-            android:icon="@android:drawable/ic_menu_edit"
-            android:title="Chat" />
-        <item
-            android:id="@+id/nav_model"
-            android:icon="@android:drawable/ic_menu_manage"
-            android:title="Model Management" />
-        <item
-            android:id="@+id/nav_rules"
-            android:icon="@android:drawable/ic_menu_sort_by_size"
-            android:title="Rules" />
-        <item
-            android:id="@+id/nav_channels"
-            android:icon="@android:drawable/ic_menu_share"
-            android:title="Channel Controls" />
-        <item
-            android:id="@+id/nav_diagnostic"
-            android:icon="@android:drawable/ic_menu_info_details"
-            android:title="AI Diagnostic" />
-    </group>
-    <item android:title="System">
-        <menu>
-            <item
-                android:id="@+id/nav_settings"
-                android:icon="@android:drawable/ic_menu_preferences"
-                android:title="Settings" />
-            <item
-                android:id="@+id/nav_about"
-                android:icon="@android:drawable/ic_menu_help"
-                android:title="About" />
-        </menu>
-    </item>
-</menu>
+<!-- DELETED — drawer navigation replaced by SettingsHubActivity in v1.5.1 -->
+<menu xmlns:android="http://schemas.android.com/apk/res/android"/>

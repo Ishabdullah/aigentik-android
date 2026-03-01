@@ -62,6 +62,8 @@ class ModelManagerActivity : AppCompatActivity() {
         ThemeHelper.applySavedTheme()
         setContentView(R.layout.activity_model_manager)
 
+        findViewById<android.widget.ImageButton>(R.id.btnBack).setOnClickListener { finish() }
+
         val showSkip = intent.getBooleanExtra(EXTRA_SHOW_SKIP, false)
 
         // Pre-fill URL

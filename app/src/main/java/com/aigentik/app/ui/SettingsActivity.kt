@@ -72,6 +72,8 @@ class SettingsActivity : AppCompatActivity() {
         rgTheme                = findViewById(R.id.rgTheme)
         tvStatus               = findViewById(R.id.tvSaveStatus)
 
+        findViewById<android.widget.ImageButton>(R.id.btnBack).setOnClickListener { finish() }
+
         val btnSave        = findViewById<Button>(R.id.btnSave)
         val btnReset       = findViewById<Button>(R.id.btnResetSetup)
 

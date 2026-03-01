@@ -46,6 +46,8 @@ class AiDiagnosticActivity : AppCompatActivity() {
         ThemeHelper.applySavedTheme()
         setContentView(R.layout.activity_ai_diagnostic)
 
+        findViewById<android.widget.ImageButton>(R.id.btnBack).setOnClickListener { finish() }
+
         tvNativeLibStatus    = findViewById(R.id.tvNativeLibStatus)
         tvModelStatus        = findViewById(R.id.tvModelStatus)
         tvModelInfo          = findViewById(R.id.tvModelInfo)

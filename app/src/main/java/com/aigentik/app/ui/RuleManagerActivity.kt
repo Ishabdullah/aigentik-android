@@ -44,6 +44,8 @@ class RuleManagerActivity : AppCompatActivity() {
         ThemeHelper.applySavedTheme()
         setContentView(R.layout.activity_rule_manager)
 
+        findViewById<android.widget.ImageButton>(R.id.btnBack).setOnClickListener { finish() }
+
         layoutSmsRules   = findViewById(R.id.layoutSmsRules)
         layoutEmailRules = findViewById(R.id.layoutEmailRules)
         tvRuleStatus     = findViewById(R.id.tvRuleStatus)

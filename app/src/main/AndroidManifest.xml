@@ -55,6 +55,9 @@
         <activity android:name=".ui.AiDiagnosticActivity"
             android:exported="false" android:label="AI Diagnostic"/>
 
+        <activity android:name=".ui.SettingsHubActivity"
+            android:exported="false" android:label="Settings"/>
+
         <!--
             foregroundServiceType="dataSync" is appropriate because AigentikService
             performs network operations (Gmail OAuth2 REST API calls) in the background.

@@ -5,7 +5,7 @@ You are continuing development of Aigentik — a privacy-first Android AI assist
 ## PROJECT OVERVIEW
 - App: Aigentik Android (com.aigentik.app)
 - Repo: ~/aigentik-android (local Termux) + GitHub (builds via Actions)
-- **Current version: v1.4.10 (versionCode 60)**
+- **Current version: v1.5.1 (versionCode 62)**
 - Developer environment: Samsung S24 Ultra, Termux only — NO Android Studio, NO local Gradle builds
 - All builds happen via GitHub Actions → APK downloaded and sideloaded
 
@@ -105,10 +105,11 @@ These policies are non-negotiable. Claude MUST refuse any implementation that vi
 - `ai/AiEngine.kt` — AI inference controller + command parser (v1.3 — null-safe generate() calls)
 - `core/AigentikPersona.kt` — structured identity/persona layer (integrated v1.4.10 — intercepts identity queries before LLM)
 - `ai/LlamaJNI.kt` — JNI wrapper for llama.cpp
-- `ui/MainActivity.kt` — dashboard
-- `ui/ChatActivity.kt` — chat interface (v1.0 — routes through MessageEngine, not standalone LLM)
-- `ui/SettingsActivity.kt` — settings + Google sign-in
-- `ui/OnboardingActivity.kt` — first run setup
+- `ui/MainActivity.kt` — launcher (redirects to Onboarding or Chat)
+- `ui/ChatActivity.kt` — chat interface (v1.1 — gear icon, no drawer)
+- `ui/SettingsHubActivity.kt` — settings navigation hub (v1.0, replaces drawer)
+- `ui/SettingsActivity.kt` — settings + Google sign-in (v2.3 — back button header)
+- `ui/OnboardingActivity.kt` — first run setup (v2.1 — auto-advance after sign-in)
 - `ui/ModelManagerActivity.kt` — model download/load/switch (lists all downloaded .gguf)
 - `ui/RuleManagerActivity.kt` — GUI for managing SMS + email routing rules
 - `ui/AiDiagnosticActivity.kt` — native lib status, model info, inference benchmark
@@ -127,7 +128,31 @@ These policies are non-negotiable. Claude MUST refuse any implementation that vi
 
 ## CHANGE LOG
 
-### v1.4.10 — Fix chat/NL crash: null-safe generate(), AigentikPersona integrated (current, 2026-02-28)
+### v1.5.1 — UI Modernization: Settings Hub, auto-advance onboarding (current, 2026-02-28)
+Modern navigation pattern — replaces left drawer with settings gear icon and clean hub screen.
+
+1. **Onboarding auto-advance** — `OnboardingActivity.kt` v2.1: After Google sign-in success,
+   `tryAutoAdvance()` checks if owner name and phone are filled. If yes, auto-saves settings
+   and chains through permissions → model → chat without requiring "Get Started" tap.
+   Button text changed from "Create Account" to "Get Started".
+2. **Drawer removed from ChatActivity** — `ChatActivity.kt` v1.1: Removed `DrawerLayout`,
+   `NavigationView`, `setupNavigation()`, `updateDrawerHeader()`. Layout flattened to plain
+   `LinearLayout`. Hamburger menu replaced with gear icon (`ic_settings.xml`) that opens
+   `SettingsHubActivity`. Send button now uses green circle background (`send_button_bg.xml`).
+3. **SettingsHubActivity created** — `SettingsHubActivity.kt` v1.0 + layout: Clean list screen
+   with 7 clickable rows: Profile & Account, Google Account, Appearance, AI Model, Message
+   Rules, AI Diagnostic, About. Dynamic subtitles show current state (owner name, email,
+   theme, model info). Back arrow returns to chat. Registered in AndroidManifest.
+4. **Back navigation on all sub-activities** — Added header bar with back arrow (`ic_arrow_back.xml`)
+   and title to: SettingsActivity, ModelManagerActivity, RuleManagerActivity, AiDiagnosticActivity.
+   Each layout wrapped in outer LinearLayout with header bar + divider above ScrollView.
+   Each Activity's `onCreate()` wires `btnBack.setOnClickListener { finish() }`.
+5. **New drawables** — `ic_arrow_back.xml` (Material back arrow, 24dp), `ic_settings.xml`
+   (Material gear, 24dp), `send_button_bg.xml` (green circle for send button).
+6. **Cleanup** — `drawer_menu.xml` and `nav_header.xml` emptied (no longer referenced).
+- Build: versionCode 62, versionName 1.5.1
+
+### v1.4.10 — Fix chat/NL crash: null-safe generate(), AigentikPersona integrated (2026-02-28)
 Three defensive fixes for chat message and natural language instruction crashes:
 
 1. **`AiEngine.kt` v1.3 — Null-safe `llama.generate()` calls**:
@@ -362,7 +387,25 @@ CLEANUP: version bump, SHA-1 corrected, constraintlayout 2.1.4, gmailAppPassword
 
 ---
 
-## CHATACTIVITY ARCHITECTURE (v1.0 — current)
+## NAVIGATION ARCHITECTURE (v1.5.1)
+
+```
+Chat (home screen)
+  └─ Gear icon (top-right) → SettingsHubActivity
+       ├─ Profile & Account → SettingsActivity
+       ├─ Google Account → SettingsActivity
+       ├─ Appearance → SettingsActivity
+       ├─ AI Model → ModelManagerActivity
+       ├─ Message Rules → RuleManagerActivity
+       ├─ AI Diagnostic → AiDiagnosticActivity
+       └─ About → AlertDialog
+```
+
+All sub-activities have a back arrow header bar. No drawer, no bottom nav.
+
+---
+
+## CHATACTIVITY ARCHITECTURE (v1.1 — current)
 
 ChatActivity does NOT have its own AI pipeline. All messages route through MessageEngine.
 

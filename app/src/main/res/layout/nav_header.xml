@@ -1,27 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- DELETED — drawer navigation replaced by SettingsHubActivity in v1.5.1 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="160dp"
-    android:background="?android:attr/windowBackground"
-    android:gravity="bottom"
-    android:orientation="vertical"
-    android:padding="16dp">
-
-    <TextView
-        android:id="@+id/tvDrawerAgentName"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Aigentik"
-        android:textColor="?android:attr/textColorPrimary"
-        android:textSize="20sp"
-        android:textStyle="bold" />
-
-    <TextView
-        android:id="@+id/tvDrawerVersion"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="v1.4.10"
-        android:textColor="?android:attr/textColorSecondary"
-        android:textSize="12sp" />
-
-</LinearLayout>
+    android:layout_height="0dp"/>

@@ -1,154 +1,137 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.drawerlayout.widget.DrawerLayout
+<LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:id="@+id/drawerLayout"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:orientation="vertical"
     android:background="?android:attr/windowBackground">
 
+    <!-- Header bar -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:orientation="vertical">
+        android:layout_height="64dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="16dp"
+        android:paddingEnd="8dp"
+        android:background="?android:attr/windowBackground">
 
-        <!-- Header bar -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="64dp"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:paddingStart="8dp"
-            android:paddingEnd="16dp"
-            android:background="?android:attr/windowBackground">
-
-            <ImageButton
-                android:id="@+id/btnMenu"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:src="@android:drawable/ic_menu_sort_by_size"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="Menu"
-                app:tint="?android:attr/textColorPrimary"/>
-
-            <TextView
-                android:id="@+id/tvChatTitle"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Aigentik"
-                android:textColor="?android:attr/textColorPrimary"
-                android:textSize="18sp"
-                android:textStyle="bold"
-                android:layout_marginStart="8dp"/>
-
-            <!-- Model status indicator -->
-            <TextView
-                android:id="@+id/tvModelIndicator"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="🟢"
-                android:textSize="16sp"
-                android:paddingEnd="4dp"/>
-
-            <TextView
-                android:id="@+id/tvModelLabel"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Ready"
-                android:textColor="@color/accent"
-                android:textSize="11sp"/>
-        </LinearLayout>
-
-        <!-- Thinking indicator bar -->
-        <LinearLayout
-            android:id="@+id/layoutThinking"
-            android:layout_width="match_parent"
+        <TextView
+            android:id="@+id/tvChatTitle"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:padding="8dp"
-            android:background="?android:attr/colorBackgroundFloating"
-            android:visibility="gone">
-
-            <TextView
-                android:id="@+id/tvThinking"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Thinking..."
-                android:textColor="@color/accent"
-                android:textSize="12sp"
-                android:fontFamily="monospace"
-                android:maxLines="2"
-                android:ellipsize="end"
-                android:layout_marginStart="8dp"/>
-        </LinearLayout>
-
-        <!-- Message list -->
-        <androidx.core.widget.NestedScrollView
-            android:id="@+id/scrollView"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
             android:layout_weight="1"
-            android:fillViewport="true"
-            android:clipToPadding="false"
-            android:paddingTop="8dp"
-            android:paddingBottom="8dp">
+            android:text="Aigentik"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textSize="18sp"
+            android:textStyle="bold"/>
 
-            <LinearLayout
-                android:id="@+id/messageContainer"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="12dp"/>
-
-        </androidx.core.widget.NestedScrollView>
-
-        <!-- Input bar -->
-        <LinearLayout
-            android:layout_width="match_parent"
+        <!-- Model status indicator -->
+        <TextView
+            android:id="@+id/tvModelIndicator"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:padding="12dp"
-            android:background="?android:attr/windowBackground">
+            android:text="🟢"
+            android:textSize="16sp"
+            android:paddingEnd="4dp"/>
 
-            <EditText
-                android:id="@+id/etMessage"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:hint="Ask anything..."
-                android:textColor="?android:attr/textColorPrimary"
-                android:textColorHint="?android:attr/textColorSecondary"
-                android:background="@drawable/input_background"
-                android:padding="12dp"
-                android:maxLines="4"
-                android:inputType="textMultiLine"
-                android:layout_marginEnd="8dp"
-                android:textSize="15sp"/>
+        <TextView
+            android:id="@+id/tvModelLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Ready"
+            android:textColor="@color/accent"
+            android:textSize="11sp"
+            android:paddingEnd="8dp"/>
 
-            <ImageButton
-                android:id="@+id/btnSend"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:src="@android:drawable/ic_menu_send"
-                android:background="@drawable/bubble_user"
-                android:contentDescription="Send"
-                app:tint="@color/onPrimary"
-                android:padding="12dp"/>
-        </LinearLayout>
+        <ImageButton
+            android:id="@+id/btnSettings"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:src="@drawable/ic_settings"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Settings"
+            app:tint="?android:attr/textColorPrimary"/>
     </LinearLayout>
 
-    <!-- Navigation Drawer -->
-    <com.google.android.material.navigation.NavigationView
-        android:id="@+id/navView"
-        android:layout_width="wrap_content"
-        android:layout_height="match_parent"
-        android:layout_gravity="start"
-        app:headerLayout="@layout/nav_header"
-        app:menu="@menu/drawer_menu"
-        android:background="?android:attr/windowBackground"/>
+    <!-- Thinking indicator bar -->
+    <LinearLayout
+        android:id="@+id/layoutThinking"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:padding="8dp"
+        android:background="?android:attr/colorBackgroundFloating"
+        android:visibility="gone">
 
-</androidx.drawerlayout.widget.DrawerLayout>
+        <TextView
+            android:id="@+id/tvThinking"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Thinking..."
+            android:textColor="@color/accent"
+            android:textSize="12sp"
+            android:fontFamily="monospace"
+            android:maxLines="2"
+            android:ellipsize="end"
+            android:layout_marginStart="8dp"/>
+    </LinearLayout>
+
+    <!-- Message list -->
+    <androidx.core.widget.NestedScrollView
+        android:id="@+id/scrollView"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true"
+        android:clipToPadding="false"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp">
+
+        <LinearLayout
+            android:id="@+id/messageContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="12dp"/>
+
+    </androidx.core.widget.NestedScrollView>
+
+    <!-- Input bar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:padding="12dp"
+        android:background="?android:attr/windowBackground">
+
+        <EditText
+            android:id="@+id/etMessage"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:hint="Ask anything..."
+            android:textColor="?android:attr/textColorPrimary"
+            android:textColorHint="?android:attr/textColorSecondary"
+            android:background="@drawable/input_background"
+            android:padding="12dp"
+            android:maxLines="4"
+            android:inputType="textMultiLine"
+            android:layout_marginEnd="8dp"
+            android:textSize="15sp"/>
+
+        <ImageButton
+            android:id="@+id/btnSend"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:src="@android:drawable/ic_menu_send"
+            android:background="@drawable/send_button_bg"
+            android:contentDescription="Send"
+            app:tint="@color/onPrimary"
+            android:padding="12dp"/>
+    </LinearLayout>
+</LinearLayout>

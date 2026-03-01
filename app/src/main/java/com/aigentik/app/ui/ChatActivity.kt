@@ -13,9 +13,7 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import androidx.core.view.GravityCompat
 import androidx.core.widget.NestedScrollView
-import androidx.drawerlayout.widget.DrawerLayout
 import com.aigentik.app.BuildConfig
 import com.aigentik.app.R
 import com.aigentik.app.ai.AiEngine
@@ -26,7 +24,6 @@ import com.aigentik.app.core.AigentikSettings
 import com.aigentik.app.core.ContactEngine
 import com.aigentik.app.core.Message
 import com.aigentik.app.core.MessageEngine
-import com.google.android.material.navigation.NavigationView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -62,8 +59,6 @@ class ChatActivity : AppCompatActivity() {
     private lateinit var tvModelIndicator: TextView
     private lateinit var tvModelLabel: TextView
     private lateinit var btnSend: ImageButton
-    private lateinit var drawerLayout: DrawerLayout
-    private lateinit var navView: NavigationView
 
     // True while waiting for MessageEngine to post a response via ChatBridge
     private var awaitingResponse = false
@@ -83,8 +78,6 @@ class ChatActivity : AppCompatActivity() {
         // ContactEngine needed for status/find local commands
         ContactEngine.init(applicationContext)
 
-        drawerLayout     = findViewById(R.id.drawerLayout)
-        navView          = findViewById(R.id.navView)
         messageContainer = findViewById(R.id.messageContainer)
         scrollView        = findViewById(R.id.scrollView)
         etMessage         = findViewById(R.id.etMessage)
@@ -97,12 +90,11 @@ class ChatActivity : AppCompatActivity() {
         val agentName = AigentikSettings.agentName
         findViewById<TextView>(R.id.tvChatTitle).text = agentName
 
-        findViewById<ImageButton>(R.id.btnMenu).setOnClickListener {
-            drawerLayout.openDrawer(GravityCompat.START)
+        // Gear icon → Settings Hub
+        findViewById<ImageButton>(R.id.btnSettings).setOnClickListener {
+            startActivity(Intent(this, SettingsHubActivity::class.java))
         }
 
-        setupNavigation()
-        updateDrawerHeader()
         btnSend.setOnClickListener { sendMessage() }
 
         updateModelStatus()
@@ -140,39 +132,6 @@ class ChatActivity : AppCompatActivity() {
     private fun startAigentik() {
         startForegroundService(Intent(this, AigentikService::class.java))
         updateModelStatus()
-    }
-
-    private fun setupNavigation() {
-        navView.setNavigationItemSelectedListener { menuItem ->
-            drawerLayout.closeDrawer(GravityCompat.START)
-            when (menuItem.itemId) {
-                R.id.nav_chat -> { /* Already here */ }
-                R.id.nav_model -> startActivity(Intent(this, ModelManagerActivity::class.java))
-                R.id.nav_rules -> startActivity(Intent(this, RuleManagerActivity::class.java))
-                R.id.nav_channels -> {
-                    // Start SettingsActivity but maybe with a specific scroll position?
-                    // For now just open settings
-                    startActivity(Intent(this, SettingsActivity::class.java))
-                }
-                R.id.nav_diagnostic -> startActivity(Intent(this, AiDiagnosticActivity::class.java))
-                R.id.nav_settings -> startActivity(Intent(this, SettingsActivity::class.java))
-                R.id.nav_about -> {
-                    val version = BuildConfig.VERSION_NAME
-                    androidx.appcompat.app.AlertDialog.Builder(this)
-                        .setTitle("Aigentik")
-                        .setMessage("Version $version\n\nPrivacy-first on-device AI assistant.")
-                        .setPositiveButton("OK", null)
-                        .show()
-                }
-            }
-            true
-        }
-    }
-
-    private fun updateDrawerHeader() {
-        val header = navView.getHeaderView(0)
-        header.findViewById<TextView>(R.id.tvDrawerAgentName).text = AigentikSettings.agentName
-        header.findViewById<TextView>(R.id.tvDrawerVersion).text = "v${BuildConfig.VERSION_NAME}"
     }
 
     private fun sendMessage() {
@@ -228,7 +187,7 @@ class ChatActivity : AppCompatActivity() {
                 android.util.Log.e("ChatActivity", "sendMessage error: ${e.message}", e)
                 withContext(Dispatchers.IO) {
                     db.chatDao().insert(ChatMessage(role = "assistant",
-                        content = "⚠️ Error: ${e.message?.take(120) ?: "unknown error"}"))
+                        content = "Error: ${e.message?.take(120) ?: "unknown error"}"))
                 }
                 awaitingResponse = false
                 hideThinking()
@@ -260,24 +219,23 @@ class ChatActivity : AppCompatActivity() {
     // Fast commands resolved on-device without going through MessageEngine
     private fun resolveLocalCommand(lower: String, original: String): String? {
         val agentName = AigentikSettings.agentName
-        val ownerName = AigentikSettings.ownerName
         return when {
             lower == "status" || lower == "check status" -> {
                 val contacts = ContactEngine.getCount()
                 "$agentName Status\n" +
-                "• Service: ${if (AigentikSettings.isPaused) "⏸ PAUSED" else "✅ ACTIVE"}\n" +
-                "• Contacts: $contacts\n" +
-                "• AI: ${AiEngine.state.name}\n" +
-                "• Model: ${if (AiEngine.isReady()) AiEngine.getModelInfo() else "Not loaded"}\n" +
-                "• Gmail: ${AigentikSettings.gmailAddress}"
+                "Service: ${if (AigentikSettings.isPaused) "PAUSED" else "ACTIVE"}\n" +
+                "Contacts: $contacts\n" +
+                "AI: ${AiEngine.state.name}\n" +
+                "Model: ${if (AiEngine.isReady()) AiEngine.getModelInfo() else "Not loaded"}\n" +
+                "Gmail: ${AigentikSettings.gmailAddress}"
             }
             lower == "pause" -> {
                 AigentikSettings.isPaused = true
-                "⏸ $agentName paused. Say 'resume' to start again."
+                "$agentName paused. Say 'resume' to start again."
             }
             lower == "resume" -> {
                 AigentikSettings.isPaused = false
-                "▶️ $agentName resumed. Auto-replies are active."
+                "$agentName resumed. Auto-replies are active."
             }
             lower.startsWith("find ") || lower.startsWith("look up ") -> {
                 val name = original
@@ -285,8 +243,8 @@ class ChatActivity : AppCompatActivity() {
                     .removePrefix("Find ").trim()
                 val contact = ContactEngine.findContact(name)
                 if (contact != null)
-                    "📒 ${contact.id}\n• Phone: ${contact.phones.firstOrNull() ?: "none"}\n" +
-                    "• Email: ${contact.emails.firstOrNull() ?: "none"}"
+                    "${contact.id}\nPhone: ${contact.phones.firstOrNull() ?: "none"}\n" +
+                    "Email: ${contact.emails.firstOrNull() ?: "none"}"
                 else "No contact found for \"$name\"."
             }
             lower == "clear chat" -> {
@@ -294,14 +252,14 @@ class ChatActivity : AppCompatActivity() {
                     delay(1500)
                     withContext(Dispatchers.IO) { db.chatDao().clearAll() }
                 }
-                "🗑 Chat history will be cleared."
+                "Chat history will be cleared."
             }
             lower == "help" || lower == "?" -> {
-                "📧 Gmail: \"check emails\", \"how many unread\", \"delete from X\", \"label X as Y\"\n" +
-                "💬 SMS: \"text Mom I'll be late\"\n" +
-                "📒 Contacts: \"find Sarah\", \"what's Dad's number\"\n" +
-                "📡 Channels: \"pause email\", \"resume sms\", \"channel status\"\n" +
-                "⚙️ System: status, pause, resume, clear chat"
+                "Gmail: \"check emails\", \"how many unread\", \"delete from X\", \"label X as Y\"\n" +
+                "SMS: \"text Mom I'll be late\"\n" +
+                "Contacts: \"find Sarah\", \"what's Dad's number\"\n" +
+                "Channels: \"pause email\", \"resume sms\", \"channel status\"\n" +
+                "System: status, pause, resume, clear chat"
             }
             else -> null  // Let MessageEngine handle it
         }
@@ -355,7 +313,7 @@ class ChatActivity : AppCompatActivity() {
             withContext(Dispatchers.IO) {
                 db.chatDao().insert(ChatMessage(
                     role = "assistant",
-                    content = "👋 Hi! I'm ${AigentikSettings.agentName}.\n\n" +
+                    content = "Hi! I'm ${AigentikSettings.agentName}.\n\n" +
                               "I can manage your Gmail, send texts, look up contacts, and more.\n" +
                               "Type 'help' to see what I can do."
                 ))
