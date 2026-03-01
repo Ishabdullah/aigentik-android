@@ -1,14 +1,8 @@
-// llama_jni.cpp v1.4
-// v1.4: KV cache prefix reuse between consecutive generations.
-//   Previously, nativeGenerate() called resetContext() at the start of every call,
-//   destroying the KV cache and requiring full prompt prefill on every generation.
-//   Now: tokenize first, compare with the previous call's prompt tokens, and if a
-//   common prefix of ≥50 tokens is found, trim the KV cache to that prefix using
-//   llama_kv_cache_seq_rm() and only decode the new tokens. This is most beneficial
-//   for interpretCommand() whose system prompt is ~700 tokens and constant — the
-//   first chat message pays the full prefill cost; all subsequent chat messages
-//   skip it and only decode the short user message (~10-20 tokens).
-//   g_last_prompt_tokens / g_last_prompt_n are cleared on model load/unload.
+// llama_jni.cpp v1.5
+// v1.5: Reverted KV cache prefix reuse (v1.4) — llama_kv_cache_seq_rm /
+//   llama_kv_self_seq_rm is not present in the cached llama.cpp version.
+//   Reverted to resetContext() at the start of every generation (same as v1.3).
+//   Safe across all supported llama.cpp versions; no functional regression.
 // v1.3: Safe UTF-8 → jstring conversion via byte array (toJavaString helper).
 //   JNI's NewStringUTF() requires Modified UTF-8 (no 4-byte sequences). LLMs
 //   commonly produce emoji and supplementary Unicode (U+10000+) which ARE valid
@@ -50,12 +44,6 @@ static const ggml_type KV_TYPE  = GGML_TYPE_Q8_0;
 static llama_model*   g_model = nullptr;
 static llama_context* g_ctx   = nullptr;
 static std::mutex     g_mutex;
-
-// KV cache prefix reuse state — protected by g_mutex
-// Stores the token sequence from the last nativeGenerate() call so that the next
-// call can skip re-decoding tokens that both prompts share at the beginning.
-static std::vector<llama_token> g_last_prompt_tokens;
-static int                      g_last_prompt_n = 0;
 
 // Safe std::string → jstring conversion.
 // JNI NewStringUTF() requires Modified UTF-8: it does NOT support 4-byte standard
@@ -115,9 +103,6 @@ Java_com_aigentik_app_ai_LlamaJNI_nativeLoadModel(
 
     if (g_ctx)   { llama_free(g_ctx);         g_ctx   = nullptr; }
     if (g_model) { llama_model_free(g_model); g_model = nullptr; }
-    // Clear prefix cache — tokens from previous model are invalid for the new model
-    g_last_prompt_tokens.clear();
-    g_last_prompt_n = 0;
 
     llama_model_params mp = llama_model_default_params();
     mp.n_gpu_layers = 0;
@@ -144,8 +129,9 @@ Java_com_aigentik_app_ai_LlamaJNI_nativeGenerate(
         return env->NewStringUTF("");
     }
 
-    // Tokenize first — needed to compute common prefix for KV cache reuse decision.
-    // (Previously resetContext() ran before tokenization; now tokenize → decide → act.)
+    // Reset context to clear KV cache from the previous generation.
+    if (!resetContext()) return env->NewStringUTF("");
+
     const char* prompt = env->GetStringUTFChars(promptStr, nullptr);
     const llama_vocab* vocab = llama_model_get_vocab(g_model);
 
@@ -167,41 +153,6 @@ Java_com_aigentik_app_ai_LlamaJNI_nativeGenerate(
         return env->NewStringUTF("Prompt too long for context window.");
     }
 
-    // KV cache prefix reuse: compare new prompt against the previous call's tokens.
-    // If they share a long common prefix (≥50 tokens), trim the KV cache to that
-    // boundary and only decode the new tokens — skipping costly prefill for the
-    // shared system prompt. Most beneficial for interpretCommand() (~700 token system
-    // prompt that is identical for every chat message).
-    int common_prefix = 0;
-    bool reuse_cache  = false;
-
-    if (!g_last_prompt_tokens.empty()) {
-        int max_cmp = (int)std::min((size_t)n, g_last_prompt_tokens.size());
-        while (common_prefix < max_cmp &&
-               tokens[common_prefix] == g_last_prompt_tokens[common_prefix]) {
-            common_prefix++;
-        }
-        // Require ≥50 shared tokens AND at least 1 new token to decode.
-        // The "at least 1 new" check ensures we always get fresh logits at position n-1.
-        reuse_cache = (common_prefix >= 50) && (common_prefix < n);
-    }
-
-    if (reuse_cache) {
-        // Remove KV entries from common_prefix to end-of-sequence:
-        // clears the old prompt tail and the old generated response, keeping the
-        // shared prefix intact so we can continue from position common_prefix.
-        llama_kv_self_seq_rm(g_ctx, 0, common_prefix, -1);
-        LOGI("KV prefix reuse: %d shared / %d new prompt tokens (saved prefill)",
-             common_prefix, n - common_prefix);
-    } else {
-        // No useful common prefix (first call, model reload, or very different prompt).
-        if (!resetContext()) return env->NewStringUTF("");
-        common_prefix = 0;
-        LOGI("Full context reset (%d shared tokens < threshold)", common_prefix);
-    }
-
-    int num_new = n - common_prefix;  // how many prompt tokens to actually decode
-
     // Build sampler chain based on temperature:
     //   temperature == 0.0 → greedy (deterministic, used for command parsing)
     //   temperature  > 0.0 → temp → top_p → dist (stochastic, better for conversation)
@@ -215,23 +166,19 @@ Java_com_aigentik_app_ai_LlamaJNI_nativeGenerate(
         llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
     }
 
-    // Size batch to max(num_new_tokens, N_BATCH) — handles large prompts safely.
-    // When reusing cache, num_new is much smaller than n (just the changed suffix).
-    int batch_sz = (num_new > N_BATCH) ? num_new : N_BATCH;
+    // Size batch to max(n, N_BATCH) — handles large prompts safely.
+    int batch_sz = (n > N_BATCH) ? n : N_BATCH;
     llama_batch batch = llama_batch_init(batch_sz, 0, 1);
     batch.n_tokens = 0;
 
-    // Decode only the new portion of the prompt at their actual sequence positions.
-    // Positions 0..common_prefix-1 are already in the KV cache from the previous call.
-    for (int i = common_prefix; i < n; i++) {
-        int local_i = i - common_prefix;
-        batch.token[local_i]     = tokens[i];
-        batch.pos[local_i]       = i;           // actual position in the full sequence
-        batch.n_seq_id[local_i]  = 1;
-        batch.seq_id[local_i][0] = 0;
-        batch.logits[local_i]    = (i == n - 1) ? 1 : 0;
+    for (int i = 0; i < n; i++) {
+        batch.token[i]     = tokens[i];
+        batch.pos[i]       = i;
+        batch.n_seq_id[i]  = 1;
+        batch.seq_id[i][0] = 0;
+        batch.logits[i]    = (i == n - 1) ? 1 : 0;
     }
-    batch.n_tokens = num_new;
+    batch.n_tokens = n;
 
     if (llama_decode(g_ctx, batch) != 0) {
         LOGE("Prompt decode failed");
@@ -278,12 +225,7 @@ Java_com_aigentik_app_ai_LlamaJNI_nativeGenerate(
 
     llama_batch_free(batch);
     llama_sampler_free(sampler);
-    LOGI("Generated %zu chars in %d tokens (prefix reuse: %d tokens saved)",
-         result.size(), pos - n, common_prefix);
-
-    // Save prompt tokens for next call's prefix reuse analysis.
-    g_last_prompt_tokens = tokens;
-    g_last_prompt_n = n;
+    LOGI("Generated %zu chars in %d tokens", result.size(), pos - n);
 
     // Use toJavaString() instead of NewStringUTF() — see helper comment above.
     return toJavaString(env, result);
@@ -301,9 +243,6 @@ Java_com_aigentik_app_ai_LlamaJNI_nativeUnload(JNIEnv*, jobject) {
     std::lock_guard<std::mutex> lock(g_mutex);
     if (g_ctx)   { llama_free(g_ctx);         g_ctx   = nullptr; }
     if (g_model) { llama_model_free(g_model); g_model = nullptr; }
-    // Clear prefix cache — invalid after model is freed
-    g_last_prompt_tokens.clear();
-    g_last_prompt_n = 0;
     LOGI("Model unloaded");
 }
 
