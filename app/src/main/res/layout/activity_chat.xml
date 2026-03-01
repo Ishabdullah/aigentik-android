@@ -131,7 +131,7 @@
             android:src="@android:drawable/ic_menu_send"
             android:background="@drawable/send_button_bg"
             android:contentDescription="Send"
-            app:tint="@color/onPrimary"
+            app:tint="@color/aigentik_on_primary"
             android:padding="12dp"/>
     </LinearLayout>
 </LinearLayout>

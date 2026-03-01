@@ -188,8 +188,8 @@
             android:layout_width="match_parent"
             android:layout_height="52dp"
             android:text="Sign in with Google"
-            android:textColor="@color/onPrimary"
-            android:backgroundTint="@color/primary"
+            android:textColor="@color/aigentik_on_primary"
+            android:backgroundTint="@color/aigentik_primary"
             android:layout_marginBottom="8dp"/>
 
         <Button android:id="@+id/btnGoogleSignOut"
@@ -213,7 +213,7 @@
             android:layout_width="match_parent"
             android:layout_height="48dp"
             android:text="Grant Gmail Permissions"
-            android:textColor="@color/onPrimary"
+            android:textColor="@color/aigentik_on_primary"
             android:backgroundTint="#FFAA00"
             android:visibility="gone"
             android:layout_marginBottom="24dp"/>
@@ -263,8 +263,8 @@
             android:layout_width="match_parent"
             android:layout_height="56dp"
             android:text="Save Settings"
-            android:textColor="@color/onPrimary"
-            android:backgroundTint="@color/primary"
+            android:textColor="@color/aigentik_on_primary"
+            android:backgroundTint="@color/aigentik_primary"
             android:layout_marginBottom="16dp"/>
 
         <TextView android:id="@+id/tvSaveStatus"

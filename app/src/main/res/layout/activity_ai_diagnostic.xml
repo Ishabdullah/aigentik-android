@@ -120,8 +120,8 @@
             android:layout_width="match_parent"
             android:layout_height="52dp"
             android:text="Run Inference Test"
-            android:textColor="@color/onPrimary"
-            android:backgroundTint="@color/primary"
+            android:textColor="@color/aigentik_on_primary"
+            android:backgroundTint="@color/aigentik_primary"
             android:layout_marginBottom="12dp"/>
 
         <TextView android:id="@+id/tvBenchmarkResult"

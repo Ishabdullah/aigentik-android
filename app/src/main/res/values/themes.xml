@@ -2,8 +2,8 @@
 <resources>
     <style name="Theme.Aigentik" parent="Theme.Material3.DayNight.NoActionBar">
         <!-- Main theme colors -->
-        <item name="colorPrimary">@color/primary</item>
-        <item name="colorOnPrimary">@color/onPrimary</item>
+        <item name="colorPrimary">@color/aigentik_primary</item>
+        <item name="colorOnPrimary">@color/aigentik_on_primary</item>
         <item name="android:statusBarColor">?android:attr/windowBackground</item>
         <item name="android:windowLightStatusBar">true</item>
     </style>

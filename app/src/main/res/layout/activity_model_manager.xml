@@ -153,8 +153,8 @@
             android:layout_width="match_parent"
             android:layout_height="52dp"
             android:text="Download from URL"
-            android:textColor="@color/onPrimary"
-            android:backgroundTint="@color/primary"
+            android:textColor="@color/aigentik_on_primary"
+            android:backgroundTint="@color/aigentik_primary"
             android:layout_marginBottom="16dp"/>
 
         <!-- Progress section -->
@@ -242,8 +242,8 @@
                 android:layout_height="52dp"
                 android:layout_weight="1"
                 android:text="Load File"
-                android:textColor="@color/onPrimary"
-                android:backgroundTint="@color/primary"/>
+                android:textColor="@color/aigentik_on_primary"
+                android:backgroundTint="@color/aigentik_primary"/>
         </LinearLayout>
 
         <!-- Skip / Continue button (onboarding only) -->
