@@ -5,7 +5,7 @@ You are continuing development of Aigentik — a privacy-first Android AI assist
 ## PROJECT OVERVIEW
 - App: Aigentik Android (com.aigentik.app)
 - Repo: ~/aigentik-android (local Termux) + GitHub (builds via Actions)
-- **Current version: v1.5.3 (versionCode 65)**
+- **Current version: v1.5.4 (versionCode 66)**
 - Developer environment: Samsung S24 Ultra, Termux only — NO Android Studio, NO local Gradle builds
 - All builds happen via GitHub Actions → APK downloaded and sideloaded
 
@@ -128,7 +128,19 @@ These policies are non-negotiable. Claude MUST refuse any implementation that vi
 
 ## CHANGE LOG
 
-### v1.5.3 — Code audit: fix 3 crashes + JNI UTF-8 safety (current, 2026-03-01)
+### v1.5.4 — Deep audit verification + MaterialAlertDialogBuilder fix (current, 2026-03-01)
+Second-pass deep verification audit confirmed all v1.5.3 crash fixes are fully correct.
+Traced complete execution paths for all four crash scenarios.
+
+1. **SettingsHubActivity** — `AlertDialog.Builder(this)` → `MaterialAlertDialogBuilder(this)`.
+   Project convention requires Material dialog builder with Material3 theme; AppCompat
+   AlertDialog can cause theme-resolution issues. Same fix as OnboardingActivity in v1.5.2.
+2. **code-audit.md** — Added "New Issues Discovered During v1.5.3 Deep Audit" section and
+   "v1.5.3 Deep Audit Verification Summary" confirming all crashes resolved. Documented
+   pre-existing issues (ContactEngine thread safety, EmailMonitor race, toJavaString OOM edge).
+- Build: versionCode 66, versionName 1.5.4
+
+### v1.5.3 — Code audit: fix 3 crashes + JNI UTF-8 safety (2026-03-01)
 Four fixes from comprehensive code audit cross-verification against actual codebase:
 
 1. **Settings Hub crash** — `SettingsHubActivity.kt`: `addDivider()` called

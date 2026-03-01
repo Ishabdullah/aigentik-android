@@ -7,8 +7,8 @@ import android.view.View
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.aigentik.app.BuildConfig
 import com.aigentik.app.R
 import com.aigentik.app.ai.AiEngine
@@ -73,7 +73,7 @@ class SettingsHubActivity : AppCompatActivity() {
         }
         addDivider()
         addRow("About", "v${BuildConfig.VERSION_NAME}") {
-            AlertDialog.Builder(this)
+            MaterialAlertDialogBuilder(this)
                 .setTitle("Aigentik")
                 .setMessage("Version ${BuildConfig.VERSION_NAME}\n\nPrivacy-first on-device AI assistant.")
                 .setPositiveButton("OK", null)
