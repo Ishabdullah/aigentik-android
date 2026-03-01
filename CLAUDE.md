@@ -5,7 +5,7 @@ You are continuing development of Aigentik — a privacy-first Android AI assist
 ## PROJECT OVERVIEW
 - App: Aigentik Android (com.aigentik.app)
 - Repo: ~/aigentik-android (local Termux) + GitHub (builds via Actions)
-- **Current version: v1.5.2 (versionCode 63)**
+- **Current version: v1.5.2 (versionCode 64)**
 - Developer environment: Samsung S24 Ultra, Termux only — NO Android Studio, NO local Gradle builds
 - All builds happen via GitHub Actions → APK downloaded and sideloaded
 
@@ -141,7 +141,10 @@ Three root-cause fixes for persistent "Can't find ColorStateList from drawable r
 3. **`OnboardingActivity.kt`** — Switched notification access dialogs from
    `AlertDialog.Builder(this)` to `MaterialAlertDialogBuilder(this)` for correct Material3
    dialog rendering (prevents theme resolution issues during dialog inflation).
-- Build: versionCode 63, versionName 1.5.2
+4. **`values/styles.xml`** — `ChatBubble.User` style had `android:textColor = @color/onPrimary`
+   (old color name). This was the last remaining reference to the old name — caused aapt2 build
+   error `resource color/onPrimary not found`. Fixed to `@color/aigentik_on_primary`.
+- Build: versionCode 64, versionName 1.5.2
 
 ### v1.5.1 — UI Modernization: Settings Hub, auto-advance onboarding (2026-02-28)
 Modern navigation pattern — replaces left drawer with settings gear icon and clean hub screen.
