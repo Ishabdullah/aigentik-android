@@ -64,9 +64,9 @@ class ChatActivity : AppCompatActivity() {
     private var awaitingResponse = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
         AigentikSettings.init(this)
         ThemeHelper.applySavedTheme()
+        super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_chat)
         db = ChatDatabase.getInstance(this)
         com.aigentik.app.core.ChatBridge.init(db)

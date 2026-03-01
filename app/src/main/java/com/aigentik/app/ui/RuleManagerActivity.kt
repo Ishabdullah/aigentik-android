@@ -10,6 +10,7 @@ import android.widget.RadioGroup
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.aigentik.app.R
+import com.aigentik.app.core.AigentikSettings
 import com.aigentik.app.core.RuleEngine
 
 // RuleManagerActivity v1.0
@@ -40,8 +41,9 @@ class RuleManagerActivity : AppCompatActivity() {
     private lateinit var rgEmailAction: RadioGroup
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
+        AigentikSettings.init(this)
         ThemeHelper.applySavedTheme()
+        super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_rule_manager)
 
         findViewById<android.widget.ImageButton>(R.id.btnBack).setOnClickListener { finish() }

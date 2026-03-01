@@ -19,7 +19,12 @@ import javax.mail.Session
 import javax.mail.internet.InternetAddress
 import javax.mail.internet.MimeMessage
 
-// GmailApiClient v1.3 — Gmail REST API via OkHttp
+// GmailApiClient v1.4 — Gmail REST API via OkHttp
+// v1.4: deleteAllMatching() now uses batchModify instead of one POST per email.
+//   Old approach: N HTTP calls (one /messages/{id}/trash per matched email).
+//   New approach: collect all matching IDs across pages, then one batchModify call per
+//   1000 IDs (Gmail API limit). batchModify with TRASH + remove INBOX is equivalent
+//   to trashing. Reduces network overhead from O(N) to O(ceil(N/1000)) calls.
 // v1.3: Improved error propagation — lastError tracks specific failure reasons
 //   (no token, auth error 401/403, API error, network error). Callers can check
 //   lastError to show actionable messages. Added checkTokenHealth() which calls
@@ -325,9 +330,12 @@ object GmailApiClient {
     }
 
     // Delete all emails matching query — DESTRUCTIVE — must go through DestructiveActionGuard
+    // Uses batchModify (single call per 1000 IDs) instead of one /trash POST per email.
+    // batchModify with addLabelIds=TRASH + removeLabelIds=INBOX is equivalent to trashing.
     suspend fun deleteAllMatching(context: Context, query: String): Int =
         withContext(Dispatchers.IO) {
-            var count = 0
+            // Phase 1: collect all matching message IDs across all pages
+            val allIds = mutableListOf<String>()
             var pageToken: String? = null
             do {
                 val encoded = java.net.URLEncoder.encode(query, "UTF-8")
@@ -337,13 +345,24 @@ object GmailApiClient {
                 val messages = result.getAsJsonArray("messages") ?: break
                 messages.forEach { el ->
                     val id = el.asJsonObject.get("id")?.asString ?: return@forEach
-                    post(context, "$BASE/messages/$id/trash", "{}")
-                    count++
+                    allIds.add(id)
                 }
                 pageToken = result.get("nextPageToken")?.asString
             } while (pageToken != null)
-            Log.i(TAG, "Trashed $count emails matching: $query")
-            count
+
+            if (allIds.isEmpty()) {
+                Log.i(TAG, "deleteAllMatching: no emails found for query: $query")
+                return@withContext 0
+            }
+
+            // Phase 2: trash all IDs in one batchModify call per 1000 (API limit)
+            var trashed = 0
+            allIds.chunked(1000).forEach { batch ->
+                val body = """{"ids":${gson.toJson(batch)},"addLabelIds":["TRASH"],"removeLabelIds":["INBOX"]}"""
+                if (post(context, "$BASE/messages/batchModify", body) != null) trashed += batch.size
+            }
+            Log.i(TAG, "deleteAllMatching: trashed $trashed emails matching: $query")
+            trashed
         }
 
     // Get a single email with metadata only (From, Subject, Date — no body)

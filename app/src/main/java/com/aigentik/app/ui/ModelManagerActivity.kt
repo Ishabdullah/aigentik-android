@@ -57,9 +57,9 @@ class ModelManagerActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
         AigentikSettings.init(this)
         ThemeHelper.applySavedTheme()
+        super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_model_manager)
 
         findViewById<android.widget.ImageButton>(R.id.btnBack).setOnClickListener { finish() }

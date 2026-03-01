@@ -53,9 +53,9 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var tvStatus: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
         AigentikSettings.init(this)
         ThemeHelper.applySavedTheme()
+        super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
 
         etAgentName            = findViewById(R.id.etAgentName)

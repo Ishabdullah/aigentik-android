@@ -43,9 +43,9 @@ class OnboardingActivity : AppCompatActivity() {
     private var isWaitingForNotificationAccess = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
         AigentikSettings.init(this)
         ThemeHelper.applySavedTheme()
+        super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_onboarding)
 
         tvStatus       = findViewById(R.id.tvStatus)

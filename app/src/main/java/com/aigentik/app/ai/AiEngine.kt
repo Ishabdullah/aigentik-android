@@ -5,7 +5,15 @@ import com.aigentik.app.core.AigentikPersona
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-// AiEngine v1.4
+// AiEngine v1.5
+// v1.5: Robust JSON command parsing — replaced fragile regex extractJsonValue() with
+//   org.json.JSONObject parsing in parseCommandJson(). The old regex
+//   "\"$key\"\\s*:\\s*\"([^\"]+)\"" failed on escaped quotes inside values and on
+//   numeric/null JSON values. JSONObject.optString() handles all edge cases cleanly.
+//   Falls back to parseSimpleCommand() if the JSON is malformed (e.g. LLM truncated
+//   its output at max_tokens=120 before closing the brace).
+// v1.4: warmUp() catch widened from Exception to Throwable — handles OOM and other
+//   JVM Error subclasses that can occur during LLM inference.
 // v1.3: Null-safe generate() calls — JNI nativeGenerate() can return null (e.g. OOM
 //   on the C++ side). Previously .trim() on a null return caused NPE in generateSmsReply
 //   and generateEmailReply (no inner try/catch), silently failing the chat response.
@@ -344,17 +352,19 @@ object AiEngine {
     }
 
     private fun parseCommandJson(json: String): CommandResult {
-        val action  = extractJsonValue(json, "action") ?: "unknown"
-        val target  = extractJsonValue(json, "target")
-        val content = extractJsonValue(json, "content")
-        val query   = extractJsonValue(json, "query")
-        return CommandResult(action, target, content, false, query)
-    }
-
-    private fun extractJsonValue(json: String, key: String): String? {
-        val pattern = Regex("\"$key\"\\s*:\\s*\"([^\"]+)\"")
-        return pattern.find(json)?.groupValues?.get(1)?.takeIf {
-            it.isNotBlank() && it != "null"
+        // Use JSONObject for robust parsing — the old regex failed on escaped quotes
+        // and numeric/null values. Falls back to parseSimpleCommand() on malformed JSON
+        // (e.g. LLM output truncated mid-JSON at max_tokens=120 boundary).
+        return try {
+            val obj     = org.json.JSONObject(json)
+            val action  = obj.optString("action",  "").takeIf { it.isNotBlank() && it != "null" } ?: "unknown"
+            val target  = obj.optString("target",  "").takeIf { it.isNotBlank() && it != "null" }
+            val content = obj.optString("content", "").takeIf { it.isNotBlank() && it != "null" }
+            val query   = obj.optString("query",   "").takeIf { it.isNotBlank() && it != "null" }
+            CommandResult(action, target, content, false, query)
+        } catch (e: org.json.JSONException) {
+            Log.w(TAG, "parseCommandJson: malformed JSON (${e.message?.take(80)}) — falling back to keyword parse")
+            parseSimpleCommand(json)
         }
     }
 

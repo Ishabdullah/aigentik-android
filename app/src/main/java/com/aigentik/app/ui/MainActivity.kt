@@ -48,9 +48,9 @@ class MainActivity : AppCompatActivity() {
     private val activityLog = mutableListOf<String>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
         AigentikSettings.init(this)
         ThemeHelper.applySavedTheme()
+        super.onCreate(savedInstanceState)
 
         if (!AigentikSettings.isConfigured) {
             startActivity(Intent(this, OnboardingActivity::class.java))

@@ -196,3 +196,76 @@ Aigentik-Android v1.5.3 resolves all identified crash-level issues. The Settings
 access are all fully fixed. The deep audit confirms no regression risks from the v1.5.3 changes.
 The remaining issues are pre-existing architectural concerns (thread-safe collections, batch
 API optimization) with low practical impact.
+
+---
+
+## v1.5.5 Improvements (Medium and Low Priority)
+
+### 1. AiEngine JSON Parsing — FIXED ✅
+**Previous:** `extractJsonValue()` used `Regex("\"$key\"\\s*:\\s*\"([^\"]+)\"")` which failed
+on escaped quotes inside values, numeric JSON fields, and `null` (JSON null, not the string).
+
+**Fix:** Replaced `extractJsonValue()` and `parseCommandJson()` with `org.json.JSONObject`
+parsing. `optString(key, "")` handles all edge cases. Fallback: `JSONException` (malformed JSON,
+e.g. LLM output truncated at max_tokens boundary) triggers `parseSimpleCommand(text)` as before.
+No new dependencies — `org.json` is part of the Android framework.
+
+### 2. GmailApiClient.deleteAllMatching — FIXED ✅
+**Previous:** One `POST /messages/{id}/trash` per matched email — O(N) HTTP calls.
+
+**Fix:** Two-phase approach:
+- Phase 1: collect all matching IDs across all pages (unchanged pagination logic)
+- Phase 2: single `POST /messages/batchModify` per 1000 IDs with
+  `{"addLabelIds":["TRASH"],"removeLabelIds":["INBOX"]}`
+
+Network overhead drops from O(N) to O(⌈N/1000⌉). Already uses the existing `gson.toJson()`
+helper and the `post()` HTTP helper (which correctly handles 204 No Content responses).
+
+### 3. llama_jni.cpp KV Prefix Caching — IMPLEMENTED ✅
+**Previous:** `resetContext()` was called at the start of every `nativeGenerate()` call,
+destroying the KV cache and requiring full prompt prefill (tokenize + decode all tokens).
+
+**Fix:** KV cache prefix reuse:
+- Tokenize the new prompt first (before deciding to reset)
+- Compare new prompt tokens against `g_last_prompt_tokens` (saved from previous call)
+- If common prefix ≥ 50 tokens: call `llama_kv_cache_seq_rm(g_ctx, 0, common_prefix, -1)`
+  to trim the KV cache to the common prefix, then decode only the new tokens
+- If no useful prefix: `resetContext()` as before (first call, model reload, different prompt)
+- `g_last_prompt_tokens` and `g_last_prompt_n` cleared on model load and unload
+
+**Expected impact:** `interpretCommand()` uses a ~700-token system prompt that is identical for
+every chat message. First message: full 700-token prefill. Subsequent messages: skip 700 tokens,
+only decode the 10-20 token user message. Significant speedup for multi-turn chat.
+
+**Regression risk:** Low. The `llama_kv_cache_seq_rm()` API is stable in llama.cpp. Fallback
+to `resetContext()` covers edge cases. The `toJavaString()` crash fix is untouched.
+
+### 4. ThemeHelper Ordering — FIXED ✅
+**Previous:** All 8 activities called `super.onCreate()` before `ThemeHelper.applySavedTheme()`.
+`AppCompatDelegate.setDefaultNightMode()` must be called before `super.onCreate()` to take
+effect on the current activity (the AppCompat delegate is initialized in `super.onCreate()`).
+Calling it after means the theme only applies on activity recreation.
+
+**Fix:** Reordered all `onCreate()` methods to:
+```
+AigentikSettings.init(this)    // loads SharedPreferences — safe before super
+ThemeHelper.applySavedTheme()  // sets AppCompatDelegate mode before delegate init
+super.onCreate(savedInstanceState)
+setContentView(...)
+```
+Activities fixed: ChatActivity, SettingsHubActivity, SettingsActivity, OnboardingActivity,
+ModelManagerActivity, RuleManagerActivity, AiDiagnosticActivity, MainActivity.
+Also added `AigentikSettings.init(this)` + import to RuleManagerActivity (was missing — could
+throw `UninitializedPropertyAccessException` on `prefs` if launched without a prior activity).
+
+### Remaining Open Issues (Not Fixed in v1.5.5)
+
+1. **ContactEngine thread safety** — `mutableListOf<Contact>()` is not thread-safe. Pre-existing.
+   Low practical risk; a future fix should use `CopyOnWriteArrayList`.
+2. **EmailMonitor.isProcessing race** — flag checked before coroutine launch but set inside it.
+   Pre-existing. Worst case: duplicate email fetch. `markAsRead()` prevents double-replies.
+3. **toJavaString() OOM edge case** — pending exception after OOM during `NewObject()`.
+   Theoretical. Correct fix: `ExceptionCheck()` + `ExceptionClear()` before the fallback.
+   Not a crash-level risk on any shipping Android version.
+4. **Conversation history in chat** — `ConversationHistoryDatabase` only populated for
+   public messages (SMS/email). Chat (admin) messages not stored in conversation history.

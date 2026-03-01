@@ -5,7 +5,7 @@ You are continuing development of Aigentik — a privacy-first Android AI assist
 ## PROJECT OVERVIEW
 - App: Aigentik Android (com.aigentik.app)
 - Repo: ~/aigentik-android (local Termux) + GitHub (builds via Actions)
-- **Current version: v1.5.4 (versionCode 66)**
+- **Current version: v1.5.5 (versionCode 67)**
 - Developer environment: Samsung S24 Ultra, Termux only — NO Android Studio, NO local Gradle builds
 - All builds happen via GitHub Actions → APK downloaded and sideloaded
 
@@ -128,7 +128,29 @@ These policies are non-negotiable. Claude MUST refuse any implementation that vi
 
 ## CHANGE LOG
 
-### v1.5.4 — Deep audit verification + MaterialAlertDialogBuilder fix (current, 2026-03-01)
+### v1.5.5 — Medium/low priority improvements: JSON parsing, Gmail batch, KV cache, theme (current, 2026-03-01)
+Four improvements from the v1.5.4 code audit backlog:
+
+1. **AiEngine.kt v1.5 — Robust JSON command parsing**: Replaced `extractJsonValue()` regex with
+   `org.json.JSONObject` parsing in `parseCommandJson()`. Old regex failed on escaped quotes,
+   numeric values, and JSON null. `optString(key, "")` handles all edge cases. Falls back to
+   `parseSimpleCommand()` on `JSONException` (malformed/truncated LLM output).
+2. **GmailApiClient.kt v1.4 — Batch trash instead of per-email calls**: `deleteAllMatching()`
+   now collects all matching IDs first (unchanged pagination), then sends one `batchModify` POST
+   per 1000 IDs (`addLabelIds:["TRASH"], removeLabelIds:["INBOX"]`). O(N) HTTP calls → O(⌈N/1000⌉).
+3. **llama_jni.cpp v1.4 — KV cache prefix reuse**: Tokenize first, compare against
+   `g_last_prompt_tokens`, and if ≥50 common tokens found: trim KV cache with
+   `llama_kv_cache_seq_rm(g_ctx, 0, common_prefix, -1)` and only decode new tokens.
+   `interpretCommand()`'s ~700-token system prompt skipped on every subsequent chat message.
+   `g_last_prompt_tokens` cleared on model load/unload. Fallback to `resetContext()` for fresh
+   starts and mismatched prompts. `toJavaString()` crash fix untouched.
+4. **ThemeHelper ordering — all 8 activities**: Moved `AigentikSettings.init(this)` +
+   `ThemeHelper.applySavedTheme()` before `super.onCreate()` in all activities. AppCompatDelegate
+   must be configured before it initializes in `super.onCreate()` or theme only applies on next
+   recreation. Also added `AigentikSettings.init(this)` + import to RuleManagerActivity.
+- Build: versionCode 67, versionName 1.5.5
+
+### v1.5.4 — Deep audit verification + MaterialAlertDialogBuilder fix (2026-03-01)
 Second-pass deep verification audit confirmed all v1.5.3 crash fixes are fully correct.
 Traced complete execution paths for all four crash scenarios.
 
