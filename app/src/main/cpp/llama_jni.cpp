@@ -190,7 +190,7 @@ Java_com_aigentik_app_ai_LlamaJNI_nativeGenerate(
         // Remove KV entries from common_prefix to end-of-sequence:
         // clears the old prompt tail and the old generated response, keeping the
         // shared prefix intact so we can continue from position common_prefix.
-        llama_kv_cache_seq_rm(g_ctx, 0, common_prefix, -1);
+        llama_kv_self_seq_rm(g_ctx, 0, common_prefix, -1);
         LOGI("KV prefix reuse: %d shared / %d new prompt tokens (saved prefill)",
              common_prefix, n - common_prefix);
     } else {
