@@ -1,4 +1,11 @@
-// llama_jni.cpp v1.2
+// llama_jni.cpp v1.3
+// v1.3: Safe UTF-8 → jstring conversion via byte array (toJavaString helper).
+//   JNI's NewStringUTF() requires Modified UTF-8 (no 4-byte sequences). LLMs
+//   commonly produce emoji and supplementary Unicode (U+10000+) which ARE valid
+//   standard UTF-8 but NOT Modified UTF-8. Passing them to NewStringUTF() causes
+//   JNI to call abort() — process terminates, uncatchable by Kotlin try/catch.
+//   Fix: toJavaString() creates a Java byte array from raw bytes and constructs
+//   a Java String using new String(bytes, "UTF-8"), which handles all Unicode.
 // v1.2: Temperature + top-p (nucleus) sampling replaces greedy sampler.
 //   - temperature=0.7f + top-p=0.9f produces more natural, varied responses
 //   - temperature=0.0f special-cased to use greedy for deterministic output
@@ -39,6 +46,28 @@ static const ggml_type KV_TYPE  = GGML_TYPE_Q8_0;
 static llama_model*   g_model = nullptr;
 static llama_context* g_ctx   = nullptr;
 static std::mutex     g_mutex;
+
+// Safe std::string → jstring conversion.
+// JNI NewStringUTF() requires Modified UTF-8: it does NOT support 4-byte standard
+// UTF-8 sequences (emoji, supplementary Unicode U+10000+). When an LLM produces
+// such bytes, NewStringUTF() calls abort() — killing the process immediately.
+// This helper creates a Java byte[] from raw bytes and uses the String(byte[], charset)
+// constructor to decode standard UTF-8 safely in Java, supporting all Unicode.
+static jstring toJavaString(JNIEnv* env, const std::string& s) {
+    if (s.empty()) return env->NewStringUTF("");
+    jbyteArray arr = env->NewByteArray((jsize)s.size());
+    if (!arr) return env->NewStringUTF("");
+    env->SetByteArrayRegion(arr, 0, (jsize)s.size(),
+                            reinterpret_cast<const jbyte*>(s.data()));
+    jclass  strClass = env->FindClass("java/lang/String");
+    jmethodID ctor   = env->GetMethodID(strClass, "<init>", "([BLjava/lang/String;)V");
+    jstring charset  = env->NewStringUTF("UTF-8");
+    auto    result   = (jstring)env->NewObject(strClass, ctor, arr, charset);
+    env->DeleteLocalRef(arr);
+    env->DeleteLocalRef(charset);
+    env->DeleteLocalRef(strClass);
+    return result ? result : env->NewStringUTF("");
+}
 
 // Recreate context to clear KV cache between generations
 // Q8_0 KV cache: ~128MB at 8k ctx vs ~512MB F16 — fits comfortably in 6GB RAM
@@ -204,7 +233,8 @@ Java_com_aigentik_app_ai_LlamaJNI_nativeGenerate(
     llama_batch_free(batch);
     llama_sampler_free(sampler);
     LOGI("Generated %zu chars in %d tokens", result.size(), pos - n);
-    return env->NewStringUTF(result.c_str());
+    // Use toJavaString() instead of NewStringUTF() — see helper comment above.
+    return toJavaString(env, result);
 }
 
 extern "C"

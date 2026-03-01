@@ -75,8 +75,10 @@ class ChatActivity : AppCompatActivity() {
         // AigentikService isn't running yet (service also sets this on startup)
         com.aigentik.app.core.MessageEngine.chatNotifier = { com.aigentik.app.core.ChatBridge.post(it) }
 
-        // ContactEngine needed for status/find local commands
-        ContactEngine.init(applicationContext)
+        // ContactEngine needed for status/find local commands.
+        // Moved off main thread — init() calls loadFromRoom() (Room DAO) which throws
+        // IllegalStateException on Android if called from the main thread.
+        scope.launch(Dispatchers.IO) { ContactEngine.init(applicationContext) }
 
         messageContainer = findViewById(R.id.messageContainer)
         scrollView        = findViewById(R.id.scrollView)

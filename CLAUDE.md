@@ -5,7 +5,7 @@ You are continuing development of Aigentik — a privacy-first Android AI assist
 ## PROJECT OVERVIEW
 - App: Aigentik Android (com.aigentik.app)
 - Repo: ~/aigentik-android (local Termux) + GitHub (builds via Actions)
-- **Current version: v1.5.2 (versionCode 64)**
+- **Current version: v1.5.3 (versionCode 65)**
 - Developer environment: Samsung S24 Ultra, Termux only — NO Android Studio, NO local Gradle builds
 - All builds happen via GitHub Actions → APK downloaded and sideloaded
 
@@ -102,7 +102,7 @@ These policies are non-negotiable. Claude MUST refuse any implementation that vi
 - `email/GmailHistoryClient.kt` — Gmail History API + on-device historyId persistence (v1.2)
 - `adapters/NotificationAdapter.kt` — NotificationListenerService for SMS/RCS + Gmail triggers (v1.3)
 - `adapters/NotificationReplyRouter.kt` — inline reply via PendingIntent (sole outbound SMS/RCS path)
-- `ai/AiEngine.kt` — AI inference controller + command parser (v1.3 — null-safe generate() calls)
+- `ai/AiEngine.kt` — AI inference controller + command parser (v1.4 — warmUp Throwable catch)
 - `core/AigentikPersona.kt` — structured identity/persona layer (integrated v1.4.10 — intercepts identity queries before LLM)
 - `ai/LlamaJNI.kt` — JNI wrapper for llama.cpp
 - `ui/MainActivity.kt` — launcher (redirects to Onboarding or Chat)
@@ -128,7 +128,36 @@ These policies are non-negotiable. Claude MUST refuse any implementation that vi
 
 ## CHANGE LOG
 
-### v1.5.2 — Fix ColorStateList crash: night-mode colors + statusBarColor (current, 2026-03-01)
+### v1.5.3 — Code audit: fix 3 crashes + JNI UTF-8 safety (current, 2026-03-01)
+Four fixes from comprehensive code audit cross-verification against actual codebase:
+
+1. **Settings Hub crash** — `SettingsHubActivity.kt`: `addDivider()` called
+   `setBackgroundResource(android.R.attr.listDivider)`, passing an attribute ID (0x010100a2)
+   as a drawable resource ID. `setBackgroundResource()` calls `resources.getDrawable(id)`
+   which throws `Resources.NotFoundException` for attribute IDs — crash on every Settings open.
+   The `setBackgroundColor()` line directly after it was unreachable (dead code after throw).
+   Fix: removed the `setBackgroundResource()` call; `setBackgroundColor(0x1AFFFFFF)` is sufficient.
+2. **LLM chat crash** — `llama_jni.cpp` v1.3: `env->NewStringUTF(result.c_str())` at line 207
+   requires Modified UTF-8. LLMs commonly produce emoji and supplementary Unicode (U+10000+)
+   which are valid standard UTF-8 but NOT Modified UTF-8. Passing them causes JNI to call
+   `abort()` — process dies immediately, uncatchable by Kotlin `catch (e: Throwable)`.
+   Warm-up used 4 ASCII tokens (passed); `generateSmsReply()` at temp=0.7 produced emoji → crash.
+   Fix: added `toJavaString()` helper that creates Java byte array from raw bytes and constructs
+   `String` via `new String(bytes, "UTF-8")`. Replaced `NewStringUTF(result.c_str())` with
+   `toJavaString(env, result)` — handles all Unicode including 4-byte supplementary chars.
+3. **Main thread Room access** — `ChatActivity.kt`: `ContactEngine.init(applicationContext)`
+   in `onCreate()` ran on the main thread, calling Room DAO `getAll()` and `insert()`.
+   Modern Android enforces IO-thread-only Room access. Not crashing only because `loadFromRoom()`
+   and `persistContact()` both have `try/catch (e: Exception)` that silently swallows the error.
+   Fix: wrapped in `scope.launch(Dispatchers.IO) { ... }`.
+4. **AiEngine warmUp exception width** — `AiEngine.kt` v1.4: `warmUp()` used
+   `catch (e: Exception)` which does not intercept `OutOfMemoryError` or other `Error` subclasses
+   that can occur during LLM inference. An uncaught `Error` in `warmUp()` would propagate and
+   set engine state to ERROR, blocking all AI for the session.
+   Fix: widened to `catch (e: Throwable)` — consistent with rest of engine error handling.
+- Build: versionCode 65, versionName 1.5.3
+
+### v1.5.2 — Fix ColorStateList crash: night-mode colors + statusBarColor (2026-03-01)
 Three root-cause fixes for persistent "Can't find ColorStateList from drawable resource ID" crash:
 
 1. **`values-night/colors.xml`** — Color names were `primary`/`onPrimary` (old names that caused
@@ -623,9 +652,11 @@ Fixed keystore SHA-1 resolves ApiException code 10.
    a "missed reply" log in AiDiagnosticActivity.
 3. **chatNotifier race** — if AigentikService starts after ChatActivity sets chatNotifier,
    service overwrites with the same lambda. This is fine but worth monitoring if behavior diverges.
-4. **ContactEngine double-init** — ContactEngine.init() called from both AigentikService and
-   ChatActivity. Second call re-syncs Android contacts (and re-runs migrateFromJsonIfNeeded,
-   which is a no-op after first migration). Harmless but slightly wasteful. Low priority.
+4. **ContactEngine IO-thread init** — ContactEngine.init() dispatched to IO in ChatActivity (v1.5.3).
+   AigentikService still calls it on its own IO coroutine scope. Both paths are now IO-safe.
+   Note: if both execute near-simultaneously, the shared in-memory `contacts` list may be written
+   concurrently. Harmless in practice (both load the same data) but not thread-safe for writes.
+   Low priority for now.
 5. **MessageEngine.appContext null if service never ran** — Gmail ops now show specific error
    ("Gmail not initialized — restart app") instead of silence. Could still improve by adding
    MessageEngine.initContext(ctx) from ChatActivity.

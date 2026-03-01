@@ -98,8 +98,9 @@ class SettingsHubActivity : AppCompatActivity() {
                 topMargin = 8
                 bottomMargin = 8
             }
-            setBackgroundResource(android.R.attr.listDivider)
-            // Use a subtle color directly since attr resolution from code is verbose
+            // NOTE: android.R.attr.listDivider is an attribute ID, not a drawable resource ID.
+            // setBackgroundResource() calls resources.getDrawable(id) and crashes with
+            // Resources.NotFoundException when passed an attr ID. Use setBackgroundColor() directly.
             setBackgroundColor(0x1AFFFFFF.toInt())
         }
         container.addView(divider)

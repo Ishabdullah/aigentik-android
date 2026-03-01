@@ -5,7 +5,7 @@ import com.aigentik.app.core.AigentikPersona
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-// AiEngine v1.3
+// AiEngine v1.4
 // v1.3: Null-safe generate() calls — JNI nativeGenerate() can return null (e.g. OOM
 //   on the C++ side). Previously .trim() on a null return caused NPE in generateSmsReply
 //   and generateEmailReply (no inner try/catch), silently failing the chat response.
@@ -79,9 +79,11 @@ object AiEngine {
             val prompt = llama.buildChatPrompt("You are a helpful assistant.", "Hello")
             val result = llama.generate(prompt, 4, temperature = 0.7f, topP = 0.9f)
             Log.i(TAG, "Warm-up done — ${result.length} chars")
-        } catch (e: Exception) {
-            // Non-fatal — model still works, first call just slower
-            Log.w(TAG, "Warm-up failed (non-fatal): ${e.message}")
+        } catch (e: Throwable) {
+            // Non-fatal — model still works, first call just slower.
+            // Catching Throwable (not just Exception) to handle OutOfMemoryError
+            // or other JVM/native errors during warm-up without crashing the app.
+            Log.w(TAG, "Warm-up failed (non-fatal): ${e.javaClass.simpleName}: ${e.message}")
         }
     }
 
