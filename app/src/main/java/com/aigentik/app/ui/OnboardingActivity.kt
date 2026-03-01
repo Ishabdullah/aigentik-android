@@ -13,8 +13,8 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.aigentik.app.R
@@ -242,7 +242,7 @@ class OnboardingActivity : AppCompatActivity() {
     }
 
     private fun showNotificationAccessDialog() {
-        AlertDialog.Builder(this)
+        MaterialAlertDialogBuilder(this)
             .setTitle("Notification Access Required")
             .setMessage(
                 "Aigentik needs Notification Access to automatically reply to your " +
@@ -269,7 +269,7 @@ class OnboardingActivity : AppCompatActivity() {
     }
 
     private fun showNotificationAccessDeniedDialog() {
-        AlertDialog.Builder(this)
+        MaterialAlertDialogBuilder(this)
             .setTitle("Notification Access Not Granted")
             .setMessage(
                 "Auto-reply will not work without this permission.\n\n" +

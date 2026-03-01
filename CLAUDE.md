@@ -5,7 +5,7 @@ You are continuing development of Aigentik — a privacy-first Android AI assist
 ## PROJECT OVERVIEW
 - App: Aigentik Android (com.aigentik.app)
 - Repo: ~/aigentik-android (local Termux) + GitHub (builds via Actions)
-- **Current version: v1.5.1 (versionCode 62)**
+- **Current version: v1.5.2 (versionCode 63)**
 - Developer environment: Samsung S24 Ultra, Termux only — NO Android Studio, NO local Gradle builds
 - All builds happen via GitHub Actions → APK downloaded and sideloaded
 
@@ -128,7 +128,22 @@ These policies are non-negotiable. Claude MUST refuse any implementation that vi
 
 ## CHANGE LOG
 
-### v1.5.1 — UI Modernization: Settings Hub, auto-advance onboarding (current, 2026-02-28)
+### v1.5.2 — Fix ColorStateList crash: night-mode colors + statusBarColor (current, 2026-03-01)
+Three root-cause fixes for persistent "Can't find ColorStateList from drawable resource ID" crash:
+
+1. **`values-night/colors.xml`** — Color names were `primary`/`onPrimary` (old names that caused
+   Material3 internal conflicts). Previous session renamed them in `values/colors.xml` but forgot
+   the night qualifier file. Renamed to `aigentik_primary`/`aigentik_on_primary` to match.
+2. **`themes.xml`** — `android:statusBarColor` was set to `?android:attr/windowBackground`.
+   In Material3, `windowBackground` resolves to a **Drawable** resource (not a color), causing
+   the ColorStateList crash whenever Android tried to apply the status bar color. Fixed to
+   `?attr/colorSurface` which is a proper Material3 color attribute.
+3. **`OnboardingActivity.kt`** — Switched notification access dialogs from
+   `AlertDialog.Builder(this)` to `MaterialAlertDialogBuilder(this)` for correct Material3
+   dialog rendering (prevents theme resolution issues during dialog inflation).
+- Build: versionCode 63, versionName 1.5.2
+
+### v1.5.1 — UI Modernization: Settings Hub, auto-advance onboarding (2026-02-28)
 Modern navigation pattern — replaces left drawer with settings gear icon and clean hub screen.
 
 1. **Onboarding auto-advance** — `OnboardingActivity.kt` v2.1: After Google sign-in success,

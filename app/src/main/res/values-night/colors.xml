@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Common Colors (Remain same or adapted for dark) -->
-    <color name="primary">#FFFFFF</color>
-    <color name="onPrimary">#000000</color>
+    <!-- Common Colors — night overrides (renamed to match values/colors.xml) -->
+    <color name="aigentik_primary">#FFFFFF</color>
+    <color name="aigentik_on_primary">#000000</color>
 
     <color name="accent">#00FF88</color>
     <color name="accent_muted">#00CC66</color>

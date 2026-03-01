@@ -4,7 +4,11 @@
         <!-- Main theme colors -->
         <item name="colorPrimary">@color/aigentik_primary</item>
         <item name="colorOnPrimary">@color/aigentik_on_primary</item>
-        <item name="android:statusBarColor">?android:attr/windowBackground</item>
+        <!-- statusBarColor must be a color, not a drawable.
+             ?android:attr/windowBackground resolves to a Drawable in Material3,
+             which crashes with "Can't find ColorStateList from drawable resource ID".
+             Use colorSurface (a color attr) or transparent instead. -->
+        <item name="android:statusBarColor">?attr/colorSurface</item>
         <item name="android:windowLightStatusBar">true</item>
     </style>
 </resources>
