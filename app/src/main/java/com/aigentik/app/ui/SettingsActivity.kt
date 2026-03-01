@@ -159,19 +159,7 @@ class SettingsActivity : AppCompatActivity() {
             }
 
             AigentikSettings.isConfigured = true
-            showStatus("Settings saved — restart app to apply", success = true)
-        }
-
-        btnManageModel?.setOnClickListener {
-            startActivity(Intent(this, ModelManagerActivity::class.java))
-        }
-
-        findViewById<Button>(R.id.btnManageRules)?.setOnClickListener {
-            startActivity(Intent(this, RuleManagerActivity::class.java))
-        }
-
-        findViewById<Button>(R.id.btnAiDiagnostic)?.setOnClickListener {
-            startActivity(Intent(this, AiDiagnosticActivity::class.java))
+            showStatus("Settings saved", success = true)
         }
 
         btnReset.setOnClickListener {
