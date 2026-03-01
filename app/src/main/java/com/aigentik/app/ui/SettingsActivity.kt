@@ -54,8 +54,9 @@ class SettingsActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_settings)
         AigentikSettings.init(this)
+        ThemeHelper.applySavedTheme()
+        setContentView(R.layout.activity_settings)
 
         etAgentName            = findViewById(R.id.etAgentName)
         etOwnerName            = findViewById(R.id.etOwnerName)

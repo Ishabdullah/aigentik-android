@@ -13,8 +13,8 @@ android {
         applicationId = "com.aigentik.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 60
-        versionName = "1.4.10"
+        versionCode = 61
+        versionName = "1.5.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {

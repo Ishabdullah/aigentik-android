@@ -167,7 +167,64 @@
             android:textColor="#FF4444"
             android:backgroundTint="?android:attr/colorBackgroundFloating"
             android:visibility="gone"
+            android:layout_marginBottom="8dp"/>
+
+        <TextView android:id="@+id/tvGmailScopeStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textSize="13sp"
+            android:visibility="gone"
+            android:layout_marginBottom="8dp"/>
+
+        <Button android:id="@+id/btnGrantGmailPerms"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="Grant Gmail Permissions"
+            android:textColor="@color/onPrimary"
+            android:backgroundTint="#FFAA00"
+            android:visibility="gone"
             android:layout_marginBottom="24dp"/>
+
+        <!-- Security -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Security"
+            android:textColor="@color/accent"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="12dp"/>
+
+        <TextView android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Admin Password (for remote commands)"
+            android:textColor="?android:attr/textColorSecondary"
+            android:textSize="12sp"
+            android:layout_marginBottom="4dp"/>
+        <EditText android:id="@+id/etAdminPassword"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="New password"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textColorHint="?android:attr/textColorSecondary"
+            android:background="@drawable/input_background"
+            android:padding="12dp"
+            android:layout_marginBottom="8dp"
+            android:inputType="textPassword"
+            android:textSize="15sp"/>
+
+        <EditText android:id="@+id/etAdminPasswordConfirm"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Confirm password"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textColorHint="?android:attr/textColorSecondary"
+            android:background="@drawable/input_background"
+            android:padding="12dp"
+            android:layout_marginBottom="24dp"
+            android:inputType="textPassword"
+            android:textSize="15sp"/>
 
         <!-- Save -->
         <Button android:id="@+id/btnSave"

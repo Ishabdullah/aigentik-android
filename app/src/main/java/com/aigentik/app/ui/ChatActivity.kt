@@ -43,9 +43,6 @@ class ChatActivity : AppCompatActivity() {
 
     companion object {
         private val REQUIRED_PERMISSIONS = arrayOf(
-            Manifest.permission.RECEIVE_SMS,
-            Manifest.permission.SEND_SMS,
-            Manifest.permission.READ_SMS,
             Manifest.permission.READ_CONTACTS,
             Manifest.permission.POST_NOTIFICATIONS
         )
@@ -73,8 +70,9 @@ class ChatActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_chat)
         AigentikSettings.init(this)
+        ThemeHelper.applySavedTheme()
+        setContentView(R.layout.activity_chat)
         db = ChatDatabase.getInstance(this)
         com.aigentik.app.core.ChatBridge.init(db)
 

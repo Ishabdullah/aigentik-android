@@ -4,6 +4,9 @@
     <color name="primary">#FFFFFF</color>
     <color name="onPrimary">#000000</color>
 
+    <color name="accent">#00FF88</color>
+    <color name="accent_muted">#00CC66</color>
+
     <!-- Theme Aware Palette -->
     <color name="bubble_user">#1E1E1E</color>
     <color name="bubble_assistant">#0A0A0A</color>

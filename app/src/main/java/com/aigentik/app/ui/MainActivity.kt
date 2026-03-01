@@ -37,9 +37,6 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private val REQUIRED_PERMISSIONS = arrayOf(
-            Manifest.permission.RECEIVE_SMS,
-            Manifest.permission.SEND_SMS,
-            Manifest.permission.READ_SMS,
             Manifest.permission.READ_CONTACTS,
             Manifest.permission.POST_NOTIFICATIONS
         )
