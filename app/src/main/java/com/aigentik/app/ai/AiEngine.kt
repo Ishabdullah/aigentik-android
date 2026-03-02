@@ -5,7 +5,15 @@ import com.aigentik.app.core.AigentikPersona
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-// AiEngine v1.5
+// AiEngine v1.6
+// v1.6: generateChatReply() — dedicated chat reply function with a chat-appropriate
+//   system prompt ("have a natural, helpful conversation") and no SMS signature or
+//   SMS framing. maxTokens=512 for fuller responses. Used by MessageEngine fast-path
+//   (genuine conversation → generateChatReply, skip interpretCommand).
+//   interpretCommand() now strips <think>...</think> blocks before JSON parsing —
+//   Qwen3 thinking-mode models generate these before the JSON output; with maxTokens=120
+//   they can consume the entire budget leaving no JSON. Stripping lets parseCommandJson
+//   see the actual JSON when it fits within the budget.
 // v1.5: Robust JSON command parsing — replaced fragile regex extractJsonValue() with
 //   org.json.JSONObject parsing in parseCommandJson(). The old regex
 //   "\"$key\"\\s*:\\s*\"([^\"]+)\"" failed on escaped quotes inside values and on
@@ -212,6 +220,48 @@ object AiEngine {
         else reply + signature
     }
 
+    // Generate a natural chat reply for the owner's in-app chat session.
+    // Unlike generateSmsReply(), this has no SMS framing, no SMS signature, and a
+    // higher token budget — appropriate for the ChatActivity conversational UI.
+    // conversationHistory: prior chat turns (oldest first, "Them: ..." / "Agent: ..." lines).
+    suspend fun generateChatReply(
+        message: String,
+        conversationHistory: List<String> = emptyList()
+    ): String = withContext(Dispatchers.IO) {
+        if (!isReady()) {
+            Log.w(TAG, "generateChatReply: model not ready")
+            return@withContext "I'm not loaded yet. Go to Settings → AI Model to load a model."
+        }
+
+        val systemMsg = "You are $agentName, an AI personal assistant for $ownerName. " +
+            "Have a natural, helpful conversation. " +
+            "You can manage Gmail, reply to texts, look up contacts, and more. " +
+            "Be concise and direct. Do not add any signature or sign-off."
+
+        val userTurn = buildString {
+            if (conversationHistory.isNotEmpty()) {
+                appendLine("Previous conversation:")
+                conversationHistory.forEach { appendLine(it) }
+                appendLine("---")
+            }
+            append(message)
+        }
+
+        val prompt = llama.buildChatPrompt(systemMsg, userTurn)
+        // temperature=0.7 + topP=0.9: natural conversational replies
+        // Null-safe: nativeGenerate() can return null (OOM/native-side error).
+        Log.d(TAG, "generateChatReply: invoking llama.generate()")
+        val raw = try {
+            llama.generate(prompt, 512, temperature = 0.7f, topP = 0.9f)
+        } catch (e: Throwable) {
+            Log.e(TAG, "generateChatReply: llama.generate() threw ${e.javaClass.simpleName}: ${e.message}")
+            null
+        }
+        val reply = raw?.trim() ?: ""
+
+        if (reply.isEmpty()) "I couldn't generate a response. Please try again." else reply
+    }
+
     // Interpret natural language admin command
     suspend fun interpretCommand(commandText: String): CommandResult =
         withContext(Dispatchers.IO) {
@@ -255,7 +305,14 @@ object AiEngine {
                 Log.d(TAG, "interpretCommand: invoking llama.generate()")
                 val rawStr = llama.generate(prompt, 120, temperature = 0.0f, topP = 1.0f)
                 val raw = rawStr?.trim() ?: return@withContext parseSimpleCommand(commandText)
-                val clean = raw.replace(Regex("```json|```|<\\|im_end\\|>.*"), "").trim()
+                // Strip <think>...</think> blocks first — Qwen3 thinking-mode models
+                // generate these before the JSON output. With maxTokens=120 the thinking
+                // content can consume the full budget leaving no JSON; stripping lets
+                // parseCommandJson see the actual JSON when it fits within the budget.
+                val clean = raw
+                    .replace(Regex("<think>[\\s\\S]*?</think>", setOf(RegexOption.IGNORE_CASE)), "")
+                    .replace(Regex("```json|```|<\\|im_end\\|>.*"), "")
+                    .trim()
                 parseCommandJson(clean)
             } catch (e: Throwable) {
                 Log.w(TAG, "Command parse failed (${e.javaClass.simpleName}): ${e.message}")

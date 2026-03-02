@@ -16,7 +16,26 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-// MessageEngine v1.9
+// MessageEngine v2.0
+// v2.0: Eliminate double LLM call for general chat messages.
+//   Root cause: handleAdminCommand() always called interpretCommand() (LLM call 1)
+//   even for pure conversation ("hello", "how are you") — which returned action=unknown
+//   — then called generateSmsReply() (LLM call 2). Combined time: 20-45s. The
+//   ChatActivity 45s safety timeout fired before the second call completed, making
+//   the app appear to "crash" (UI froze then unlocked with no response visible).
+//
+//   Fix: Fast-path in handleAdminCommand() using parseSimpleCommandPublic() (no LLM)
+//   and looksLikeCommand() keyword check:
+//   - parseSimpleCommand returns "unknown" AND no command keywords → genuine conversation
+//     → generateChatReply() directly (1 LLM call). interpretCommand() is never called.
+//   - parseSimpleCommand returns a known action OR input has command keywords (email,
+//     trash, phone, find, text, etc.) → call interpretCommand() as before (1 or 2 calls
+//     depending on whether action dispatch needs a second generation step — same as v1.9).
+//
+//   Also: genuine conversation fallback in the when(result.action) else branch (reached
+//   only when interpretCommand returns unknown for something that looked like a command)
+//   now calls generateChatReply() instead of generateSmsReply(). This removes the SMS
+//   auto-reply framing and "— Aigentik, personal agent of Ish" signature from chat.
 // v1.9: Chat conversation history persistence.
 //   Admin chat (CHAT channel) "genuine conversation" branch now persists exchanges
 //   to ConversationHistoryDatabase under contactKey="owner", channel="CHAT". This
@@ -239,6 +258,30 @@ object MessageEngine {
         }
 
         try {
+            // Fast-path: if the input has no command-like keywords and parseSimpleCommand
+            // returns "unknown", this is genuine conversation — skip interpretCommand()
+            // entirely and call generateChatReply() directly (1 LLM call instead of 2).
+            // Eliminates the 20-45s double-inference hang on every general chat message.
+            val quickResult = AiEngine.parseSimpleCommandPublic(input)
+            if (quickResult.action == "unknown" && !looksLikeCommand(lower)) {
+                Log.d(TAG, "handleAdminCommand: fast-path — genuine conversation (no command keywords)")
+                if (AiEngine.isReady()) {
+                    val chatHistory = if (message.channel == Message.Channel.CHAT)
+                        loadHistory("owner", "CHAT") else emptyList()
+                    if (message.channel == Message.Channel.CHAT) {
+                        recordHistory("owner", "CHAT", "user", input)
+                    }
+                    val reply = AiEngine.generateChatReply(input, chatHistory)
+                    if (message.channel == Message.Channel.CHAT) {
+                        recordHistory("owner", "CHAT", "assistant", reply.trim())
+                    }
+                    notify(reply)
+                } else {
+                    notify("Try: status, channels, find [name], check emails, or just ask me anything.")
+                }
+                return
+            }
+
             Log.i(TAG, "handleAdminCommand: calling interpretCommand")
             val result = AiEngine.interpretCommand(input)
             Log.i(TAG, "Command: ${result.action} target=${result.target}")
@@ -683,31 +726,23 @@ object MessageEngine {
                         }
 
                         else -> {
-                            // Genuine conversation — use AI
+                            // Genuine conversation that slipped past the fast-path (input had
+                            // command keywords but interpretCommand still returned unknown).
+                            // Use generateChatReply() — correct chat prompt, no SMS framing.
                             if (AiEngine.isReady()) {
-                                Log.d(TAG, "handleAdminCommand: generating AI chat reply")
-                                // Load prior chat turns for multi-turn context (CHAT channel only).
-                                // historyDao null-safe: loadHistory returns [] if not yet configured.
+                                Log.d(TAG, "handleAdminCommand: fallback — genuine conversation via generateChatReply")
                                 val chatHistory = if (message.channel == Message.Channel.CHAT)
                                     loadHistory("owner", "CHAT") else emptyList()
-                                // Record the user's input before generation (consistent with handlePublicMessage).
                                 if (message.channel == Message.Channel.CHAT) {
                                     recordHistory("owner", "CHAT", "user", input)
                                 }
-                                val reply = AiEngine.generateSmsReply(
-                                    ownerName, adminNumber, input, null, null, chatHistory
-                                )
-                                // Record Aigentik's reply (strip signature for cleaner context).
+                                val reply = AiEngine.generateChatReply(input, chatHistory)
                                 if (message.channel == Message.Channel.CHAT) {
-                                    val replyForHistory = reply
-                                        .substringBefore("\n\n—")
-                                        .substringBefore("\n\n---")
-                                        .trim()
-                                    recordHistory("owner", "CHAT", "assistant", replyForHistory)
+                                    recordHistory("owner", "CHAT", "assistant", reply.trim())
                                 }
                                 notify(reply)
                             } else {
-                                notify("Try: status, channels, find [name], text [name] [msg], stop/start sms/email/gvoice")
+                                notify("Try: status, channels, find [name], check emails, or just ask me anything.")
                             }
                         }
                     }
@@ -720,6 +755,21 @@ object MessageEngine {
             notify("⚠️ Error: ${e.message?.take(80) ?: e.javaClass.simpleName}")
         }
     }
+
+    // Returns true if the lowercased input contains keywords that suggest a command
+    // (email ops, contact lookup, SMS send, etc.). Used by the handleAdminCommand
+    // fast-path to decide whether to call interpretCommand() (1 LLM call) or skip
+    // straight to generateChatReply() (also 1 LLM call but for genuine conversation).
+    // Conservative: if ANY keyword is present, we treat it as a potential command.
+    // False negatives (genuine conversation containing a keyword) are acceptable —
+    // interpretCommand() returns "unknown" and the keyword fallback handles them.
+    private fun looksLikeCommand(lower: String): Boolean =
+        lower.contains("email") || lower.contains("inbox") || lower.contains("unread") ||
+        lower.contains("trash") || lower.contains("spam")  || lower.contains("label") ||
+        lower.startsWith("text ") || lower.contains("send ") || lower.contains("sms") ||
+        lower.contains("contact") || lower.contains("number") || lower.contains("phone") ||
+        lower.startsWith("find ") || lower.contains("look up") ||
+        lower.contains("unsubscribe") || lower.contains("mark") || lower.contains("sync")
 
     // Normalized contact key for conversation history lookups
     // Phone-based messages: use last 10 digits. Email-based: use email lowercase.

@@ -178,8 +178,10 @@ class ChatActivity : AppCompatActivity() {
                     MessageEngine.onMessageReceived(msg)
                 }
 
-                // Safety timeout — re-enable after 45s if chatNotifier never fires
-                delay(45_000)
+                // Safety timeout — re-enable after 120s if chatNotifier never fires.
+                // Increased from 45s: generateChatReply() runs at up to 512 tokens
+                // which can take 25-60s on its own; 45s was too tight and fired mid-inference.
+                delay(120_000)
                 if (awaitingResponse) {
                     awaitingResponse = false
                     hideThinking()

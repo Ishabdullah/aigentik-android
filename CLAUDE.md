@@ -5,7 +5,7 @@ You are continuing development of Aigentik — a privacy-first Android AI assist
 ## PROJECT OVERVIEW
 - App: Aigentik Android (com.aigentik.app)
 - Repo: ~/aigentik-android (local Termux) + GitHub (builds via Actions)
-- **Current version: v1.6.0 (versionCode 68)**
+- **Current version: v1.6.1 (versionCode 69)**
 - Developer environment: Samsung S24 Ultra, Termux only — NO Android Studio, NO local Gradle builds
 - All builds happen via GitHub Actions → APK downloaded and sideloaded
 
@@ -102,7 +102,7 @@ These policies are non-negotiable. Claude MUST refuse any implementation that vi
 - `email/GmailHistoryClient.kt` — Gmail History API + on-device historyId persistence (v1.2)
 - `adapters/NotificationAdapter.kt` — NotificationListenerService for SMS/RCS + Gmail triggers (v1.3)
 - `adapters/NotificationReplyRouter.kt` — inline reply via PendingIntent (sole outbound SMS/RCS path)
-- `ai/AiEngine.kt` — AI inference controller + command parser (v1.4 — warmUp Throwable catch)
+- `ai/AiEngine.kt` — AI inference controller + command parser (v1.6 — generateChatReply, think stripping)
 - `core/AigentikPersona.kt` — structured identity/persona layer (integrated v1.4.10 — intercepts identity queries before LLM)
 - `ai/LlamaJNI.kt` — JNI wrapper for llama.cpp
 - `ui/MainActivity.kt` — launcher (redirects to Onboarding or Chat)
@@ -128,7 +128,39 @@ These policies are non-negotiable. Claude MUST refuse any implementation that vi
 
 ## CHANGE LOG
 
-### v1.6.0 — Stability hardening: thread safety, race fix, JNI hygiene, chat history (current, 2026-03-02)
+### v1.6.1 — Fix chat LLM crash: fast-path, generateChatReply, think stripping, timeout (current, 2026-03-02)
+Four fixes for the double-LLM-call "crash" (45s freeze) when typing general messages in chat:
+
+1. **MessageEngine.kt v2.0 — Fast-path eliminates double LLM call**: Added `looksLikeCommand()`
+   helper and pre-check using `parseSimpleCommandPublic()` at the start of the `try` block in
+   `handleAdminCommand()`. If `parseSimpleCommand` returns `unknown` AND the input has no
+   command keywords (email, inbox, trash, find, phone, send, etc.) → genuine conversation →
+   calls `generateChatReply()` directly and returns. `interpretCommand()` is never called.
+   For inputs with command keywords → falls through to `interpretCommand()` as before.
+   Root cause: every chat message ("hello", "how are you") previously called `interpretCommand()`
+   (LLM call 1, ~120 tokens greedy) → returned `unknown` → called `generateSmsReply()`
+   (LLM call 2, ~256 tokens). Combined: 20-45s. The 45s safety timeout in ChatActivity fired
+   first, re-enabling the UI while the LLM was still running — appeared as a crash/freeze.
+2. **AiEngine.kt v1.6 — `generateChatReply()`**: New function with chat-appropriate system
+   prompt ("Have a natural, helpful conversation. Do not add any signature or sign-off.").
+   maxTokens=512, temperature=0.7/topP=0.9. No SMS framing, no SMS signature. Used by:
+   (a) the new fast-path for genuine conversation, (b) the `when(result.action) else →` fallback
+   block when `interpretCommand()` returns `unknown` for something that looked like a command.
+   Previous: both paths used `generateSmsReply()` with "Reply to a text from Ish from Ish"
+   framing + "— Aigentik, personal agent of Ish. If you need to reach Ish..." signature —
+   inappropriate for the chat UI and confusing for the model.
+3. **AiEngine.kt v1.6 — Strip `<think>` blocks in `interpretCommand()`**: Added
+   `.replace(Regex("<think>[\\s\\S]*?</think>", setOf(RegexOption.IGNORE_CASE)), "")` before
+   the existing cleanup regex in `interpretCommand()`. Qwen3 thinking-mode models generate
+   `<think>...</think>` blocks before JSON output; with `maxTokens=120` these consume the
+   entire budget leaving no JSON. Stripping makes `parseCommandJson` see the actual JSON
+   when it fits within the budget. Falls back to `parseSimpleCommand` if still malformed.
+4. **ChatActivity.kt — Safety timeout 45s → 120s**: `delay(45_000)` → `delay(120_000)`.
+   `generateChatReply()` at 512 tokens can take 25-60s; 45s was too tight and fired during
+   normal inference. 120s is a genuine safety net for stuck states, not a race condition.
+- Build: versionCode 69, versionName 1.6.1
+
+### v1.6.0 — Stability hardening: thread safety, race fix, JNI hygiene, chat history (2026-03-02)
 Four architectural correctness fixes — no features added, no regressions:
 
 1. **ContactEngine.kt v0.6 — Thread-safe in-memory cache**: Replaced `mutableListOf<Contact>()`
@@ -223,7 +255,9 @@ User types message → sendMessage()
     └─ (if null) → MessageEngine.onMessageReceived(Message.Channel.CHAT)
                          │
                          ├─ handleAdminCommand() (CHAT is always trusted)
-                         │     AiEngine.interpretCommand() → action dispatch
+                         │     Fast-path: parseSimpleCommand() + looksLikeCommand()
+                         │       genuine conversation → AiEngine.generateChatReply()
+                         │       command keywords → AiEngine.interpretCommand() → action dispatch
                          │     Gmail API / SMS / contacts / channel toggles
                          │
                          └─ notify(response)
