@@ -2,6 +2,10 @@
 
 **Your personal AI agent — running entirely on your Android device.**
 
+<p align="center">
+  <img src="docs/images/aigentik_app_icon.jpg" width="180" alt="Aigentik App Icon">
+</p>
+
 Aigentik is a fully offline, on-device AI assistant for Android. It monitors your SMS, RCS, Google Voice, and Gmail — replying intelligently on your behalf using a locally-hosted language model. No cloud inference. No subscriptions. Your data never leaves your phone.
 
 ---
