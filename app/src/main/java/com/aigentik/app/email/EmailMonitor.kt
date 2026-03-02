@@ -5,13 +5,24 @@ import android.util.Log
 import com.aigentik.app.auth.GoogleAuthManager
 import com.aigentik.app.core.ChannelManager
 import com.aigentik.app.core.MessageEngine
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
 
-// EmailMonitor v4.1 — on-device notification-triggered Gmail processing
+// EmailMonitor v4.2 — on-device notification-triggered Gmail processing
+//
+// v4.2: Hard crash prevention.
+//   1. CoroutineExceptionHandler added to scope — previously EmailMonitor's scope had no
+//      handler, so an unhandled Error (OOM, StackOverflow from Html.fromHtml on large HTML)
+//      inside a launched coroutine escaped to Android's default UncaughtExceptionHandler
+//      which kills the process. Handler now logs and does not re-throw.
+//   2. catch(e: Exception) widened to catch(e: Throwable) in per-email try/catch blocks.
+//      OOM and StackOverflowError are Error subclasses — they bypassed catch(Exception).
+//   Also updated storeEmailContext/storeGVoiceContext calls to pass sender key (not messageId)
+//   so EmailRouter can find the MOST RECENT email per sender for replies.
 //
 // v4.1: Fixed isProcessing race condition.
 //   Previous: @Volatile Boolean checked in onGmailNotification() but set to true INSIDE
@@ -40,7 +51,16 @@ object EmailMonitor {
 
     private const val TAG = "EmailMonitor"
 
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val scope = CoroutineScope(
+        Dispatchers.IO + SupervisorJob() +
+        CoroutineExceptionHandler { _, e ->
+            // Catches unhandled errors (OOM, StackOverflow, etc.) from launched coroutines.
+            // Without this handler, such errors escape to Android's UncaughtExceptionHandler
+            // which kills the entire process — causing the "app has a bug" hard crash dialog.
+            Log.e(TAG, "Uncaught error in EmailMonitor scope: ${e.javaClass.simpleName}: ${e.message}", e)
+            isProcessing.set(false)  // ensure lock is released even on hard error
+        }
+    )
 
     // AtomicBoolean: compareAndSet(false, true) is a single atomic read+write operation.
     // This eliminates the race window that existed with @Volatile Boolean (check then set).
@@ -121,8 +141,8 @@ object EmailMonitor {
                     }
                     processEmail(context, email)
                     GmailApiClient.markAsRead(context, email.gmailId)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to process email $msgId: ${e.message}")
+                } catch (e: Throwable) {
+                    Log.e(TAG, "Failed to process email $msgId: ${e.javaClass.simpleName}: ${e.message}")
                 }
             }
         }
@@ -148,8 +168,8 @@ object EmailMonitor {
                 if (email.fromEmail.equals(ownEmail, ignoreCase = true)) continue
                 processEmail(context, email)
                 GmailApiClient.markAsRead(context, email.gmailId)
-            } catch (e: Exception) {
-                Log.e(TAG, "Fallback email processing failed: ${e.message}")
+            } catch (e: Throwable) {
+                Log.e(TAG, "Fallback email processing failed: ${e.javaClass.simpleName}: ${e.message}")
             }
         }
     }
@@ -169,7 +189,9 @@ object EmailMonitor {
                 if (gvm != null) {
                     Log.i(TAG, "GVoice SMS from ${gvm.senderName} (${gvm.senderPhone})")
                     val msg = buildGVoiceMessage(gvm)
-                    EmailRouter.storeGVoiceContext(msg.id, gvm)
+                    // Key by senderPhone so routeReply() can find the most recent context
+                    // for this sender directly, without iterating all entries
+                    EmailRouter.storeGVoiceContext(gvm.senderPhone, gvm)
                     MessageEngine.onMessageReceived(msg)
                 } else {
                     Log.w(TAG, "GVoice parse failed: ${email.subject}")
@@ -181,7 +203,9 @@ object EmailMonitor {
                     return
                 }
                 val msg = buildEmailMessage(email)
-                EmailRouter.storeEmailContext(msg.id, email)
+                // Key by fromEmail so routeReply() always uses the most recent email
+                // from this sender (overwriting the previous entry for same sender)
+                EmailRouter.storeEmailContext(email.fromEmail, email)
                 MessageEngine.onMessageReceived(msg)
             }
         }

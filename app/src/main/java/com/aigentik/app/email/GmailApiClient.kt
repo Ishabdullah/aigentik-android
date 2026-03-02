@@ -19,7 +19,14 @@ import javax.mail.Session
 import javax.mail.internet.InternetAddress
 import javax.mail.internet.MimeMessage
 
-// GmailApiClient v1.4 — Gmail REST API via OkHttp
+// GmailApiClient v1.5 — Gmail REST API via OkHttp
+// v1.5: Fixed extractBody() — recursive MIME traversal + HTML truncation to prevent
+//   OOM/StackOverflowError on multi-turn email thread replies. Old single-level code
+//   missed text/plain nested inside multipart/mixed → multipart/alternative, fell back
+//   to HTML which can be hundreds of KB. Html.fromHtml() on large HTML throws Error
+//   subclasses that bypass catch(Exception) and kill the process. Fix: recurse up to
+//   depth 10, cap HTML input at 16 KB, wrap fromHtml in catch(Throwable) with regex
+//   strip fallback, cap final body at 4000 chars.
 // v1.4: deleteAllMatching() now uses batchModify instead of one POST per email.
 //   Old approach: N HTTP calls (one /messages/{id}/trash per matched email).
 //   New approach: collect all matching IDs across pages, then one batchModify call per
@@ -545,34 +552,70 @@ object GmailApiClient {
 
     // --- Helpers ---
 
-    private fun extractBody(payload: JsonObject?): String {
-        if (payload == null) return ""
+    private fun extractBody(payload: JsonObject?): String =
+        extractBodyRecursive(payload, 0)
+
+    // Recursively searches MIME parts for a text/plain body, then falls back to text/html.
+    // Multi-turn email thread replies typically have nested structure:
+    //   multipart/mixed → multipart/alternative → text/plain + text/html
+    // The old single-level code missed text/plain at depth > 1 and fell back to the HTML part,
+    // which for long threads contains the full quoted history (hundreds of KB).
+    // Html.fromHtml() on such content causes OOM or StackOverflowError — both are Error
+    // subclasses that bypass catch (e: Exception) and crash the process.
+    //
+    // Fixes:
+    //   1. Recurse into nested multipart/* parts to find text/plain at any depth.
+    //   2. Truncate raw HTML to 16 KB before fromHtml() to prevent OOM.
+    //   3. Wrap fromHtml() in try/catch(Throwable) with regex-strip fallback.
+    //   4. Cap final body at 4000 chars — sufficient for AI context, avoids large allocations.
+    private fun extractBodyRecursive(payload: JsonObject?, depth: Int): String {
+        if (payload == null || depth > 10) return ""
         val mimeType = payload.get("mimeType")?.asString ?: ""
         val data = payload.getAsJsonObject("body")?.get("data")?.asString
 
+        // Direct text/plain at this level — return immediately
         if (mimeType == "text/plain" && data != null) {
-            return String(Base64.decode(data, Base64.URL_SAFE))
+            return String(Base64.decode(data, Base64.URL_SAFE)).take(4000)
         }
 
         val parts = payload.getAsJsonArray("parts") ?: return ""
+
+        // First pass: prefer text/plain; recurse into nested multipart before trying HTML
         for (part in parts) {
             val p = part.asJsonObject
             val pType = p.get("mimeType")?.asString ?: continue
-            val pData = p.getAsJsonObject("body")?.get("data")?.asString
-            if (pType == "text/plain" && pData != null) {
-                return String(Base64.decode(pData, Base64.URL_SAFE))
+            if (pType == "text/plain") {
+                val pData = p.getAsJsonObject("body")?.get("data")?.asString
+                if (pData != null) return String(Base64.decode(pData, Base64.URL_SAFE)).take(4000)
+            }
+            if (pType.startsWith("multipart/")) {
+                val result = extractBodyRecursive(p, depth + 1)
+                if (result.isNotEmpty()) return result
             }
         }
-        // HTML fallback
+
+        // Second pass: HTML fallback — truncate before fromHtml to prevent OOM on thread history
         for (part in parts) {
             val p = part.asJsonObject
             val pType = p.get("mimeType")?.asString ?: continue
-            val pData = p.getAsJsonObject("body")?.get("data")?.asString
-            if (pType == "text/html" && pData != null) {
-                val html = String(Base64.decode(pData, Base64.URL_SAFE))
-                return android.text.Html.fromHtml(
-                    html, android.text.Html.FROM_HTML_MODE_COMPACT
-                ).toString()
+            if (pType == "text/html") {
+                val pData = p.getAsJsonObject("body")?.get("data")?.asString
+                if (pData != null) {
+                    // Cap raw HTML at 16 KB — email thread histories can be hundreds of KB
+                    // and Html.fromHtml() on large input causes OOM / StackOverflowError
+                    val html = String(Base64.decode(pData, Base64.URL_SAFE)).take(16_000)
+                    return try {
+                        android.text.Html.fromHtml(html, android.text.Html.FROM_HTML_MODE_COMPACT)
+                            .toString().take(4000)
+                    } catch (e: Throwable) {
+                        Log.w(TAG, "Html.fromHtml failed (${e.javaClass.simpleName}) — using regex strip")
+                        html.replace(Regex("<[^>]*>"), "").take(4000)
+                    }
+                }
+            }
+            if (pType.startsWith("multipart/")) {
+                val result = extractBodyRecursive(p, depth + 1)
+                if (result.isNotEmpty()) return result
             }
         }
         return ""

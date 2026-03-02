@@ -5,7 +5,7 @@ You are continuing development of Aigentik — a privacy-first Android AI assist
 ## PROJECT OVERVIEW
 - App: Aigentik Android (com.aigentik.app)
 - Repo: ~/aigentik-android (local Termux) + GitHub (builds via Actions)
-- **Current version: v1.6.1 (versionCode 69)**
+- **Current version: v1.6.2 (versionCode 70)**
 - Developer environment: Samsung S24 Ultra, Termux only — NO Android Studio, NO local Gradle builds
 - All builds happen via GitHub Actions → APK downloaded and sideloaded
 
@@ -96,9 +96,9 @@ These policies are non-negotiable. Claude MUST refuse any implementation that vi
 - `auth/GoogleAuthManager.kt` — OAuth2 manager (v1.8)
 - `auth/AdminAuthManager.kt` — remote admin auth (30-min sessions)
 - `auth/DestructiveActionGuard.kt` — two-step confirmation for Gmail destructive actions
-- `email/GmailApiClient.kt` — Gmail REST API via OkHttp (v1.3)
-- `email/EmailMonitor.kt` — notification-triggered Gmail fetch (v4.0, no polling)
-- `email/EmailRouter.kt` — routes email replies and owner notifications
+- `email/GmailApiClient.kt` — Gmail REST API via OkHttp (v1.5 — recursive MIME extraction)
+- `email/EmailMonitor.kt` — notification-triggered Gmail fetch (v4.2 — CoroutineExceptionHandler, catch Throwable)
+- `email/EmailRouter.kt` — routes email replies (v2.2 — ConcurrentHashMap, sender-keyed context)
 - `email/GmailHistoryClient.kt` — Gmail History API + on-device historyId persistence (v1.2)
 - `adapters/NotificationAdapter.kt` — NotificationListenerService for SMS/RCS + Gmail triggers (v1.3)
 - `adapters/NotificationReplyRouter.kt` — inline reply via PendingIntent (sole outbound SMS/RCS path)
@@ -159,6 +159,44 @@ Four fixes for the double-LLM-call "crash" (45s freeze) when typing general mess
    `generateChatReply()` at 512 tokens can take 25-60s; 45s was too tight and fired during
    normal inference. 120s is a genuine safety net for stuck states, not a race condition.
 - Build: versionCode 69, versionName 1.6.1
+
+### v1.6.2 — Fix email hard crash: recursive MIME extraction, Html.fromHtml safety, thread-safe maps (2026-03-02)
+Four root-cause fixes for the hard process crash (Android "app has a bug" dialog):
+
+**Root cause:** Multi-turn email thread replies have nested MIME structure:
+`multipart/mixed → multipart/alternative → text/plain + text/html`
+Old `extractBody()` only looked 1 level deep → missed `text/plain` → fell back to HTML.
+HTML body of a thread with history can be hundreds of KB. `Html.fromHtml()` on that
+throws `OutOfMemoryError` or `StackOverflowError` — both `Error` subclasses, NOT caught
+by `catch (e: Exception)`. EmailMonitor's scope had NO `CoroutineExceptionHandler` →
+unhandled Error escaped to Android's default `UncaughtExceptionHandler` → process kill.
+Second issue: `emailContextMap` keyed by `messageId`, but `routeReply()` iterated and
+found the FIRST (oldest) email from a sender — multi-turn reply used wrong `threadId`.
+
+1. **GmailApiClient.kt v1.5 — Recursive MIME body extraction + HTML truncation**:
+   Replaced `extractBody()` (1-level only) with `extractBodyRecursive()` (depth-first,
+   max 10 levels). First pass: searches for `text/plain` recursing into `multipart/*`
+   before trying HTML. Second pass: HTML fallback now truncates raw HTML to 16 KB before
+   `Html.fromHtml()` (prevents OOM on multi-KB thread histories), wraps `fromHtml()` in
+   `catch (e: Throwable)` with regex-strip fallback. All extracted bodies capped at 4000
+   chars (sufficient for AI context). This directly prevents the crash from large HTML.
+2. **EmailMonitor.kt v4.2 — CoroutineExceptionHandler + catch(Throwable)**:
+   Added `CoroutineExceptionHandler` to scope — logs the error and resets `isProcessing`.
+   Without this, any unhandled `Error` in a launched coroutine killed the process.
+   Widened per-email `catch (e: Exception)` → `catch (e: Throwable)` in both
+   `processFromHistory()` and `processUnread()`. Updated `storeEmailContext()` /
+   `storeGVoiceContext()` calls to pass sender identifier (not messageId) as the key.
+3. **EmailRouter.kt v2.2 — ConcurrentHashMap + correct sender-keyed context**:
+   Changed `gvoiceContextMap` and `emailContextMap` from plain `mutableMapOf()`
+   (LinkedHashMap, NOT thread-safe) to `ConcurrentHashMap` — prevents
+   `ConcurrentModificationException` from concurrent notification/reply coroutines.
+   Context now keyed by sender: `fromEmail.lowercase()` for email, last-10-phone-digits
+   for GVoice. Overwriting on same sender = map always holds most recent email per sender.
+   `routeReply()` now does O(1) direct map lookup instead of O(N) iteration (which found
+   the oldest entry due to LinkedHashMap insertion order). Multi-turn replies now use the
+   correct `threadId`/`messageId` from the LATEST email in the thread.
+   Added `CoroutineExceptionHandler` to EmailRouter scope.
+- Build: versionCode 70, versionName 1.6.2
 
 ### v1.6.0 — Stability hardening: thread safety, race fix, JNI hygiene, chat history (2026-03-02)
 Four architectural correctness fixes — no features added, no regressions:
