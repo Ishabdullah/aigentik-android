@@ -5,7 +5,7 @@ You are continuing development of Aigentik — a privacy-first Android AI assist
 ## PROJECT OVERVIEW
 - App: Aigentik Android (com.aigentik.app)
 - Repo: ~/aigentik-android (local Termux) + GitHub (builds via Actions)
-- **Current version: v1.5.5 (versionCode 67)**
+- **Current version: v1.6.0 (versionCode 68)**
 - Developer environment: Samsung S24 Ultra, Termux only — NO Android Studio, NO local Gradle builds
 - All builds happen via GitHub Actions → APK downloaded and sideloaded
 
@@ -128,7 +128,35 @@ These policies are non-negotiable. Claude MUST refuse any implementation that vi
 
 ## CHANGE LOG
 
-### v1.5.5 — Medium/low priority improvements: JSON parsing, Gmail batch, KV cache, theme (current, 2026-03-01)
+### v1.6.0 — Stability hardening: thread safety, race fix, JNI hygiene, chat history (current, 2026-03-02)
+Four architectural correctness fixes — no features added, no regressions:
+
+1. **ContactEngine.kt v0.6 — Thread-safe in-memory cache**: Replaced `mutableListOf<Contact>()`
+   (ArrayList, not thread-safe) with `@Volatile CopyOnWriteArrayList<Contact>`. `loadFromRoom()`
+   now does atomic reference replacement (`contacts = CopyOnWriteArrayList(newList)`) instead
+   of `clear()+addAll()` — eliminates the empty-list window visible to concurrent readers.
+   Reads (find/filter/size) are lock-free; writes (add) are copy-on-write thread-safe.
+2. **EmailMonitor.kt v4.1 — AtomicBoolean for isProcessing**: Replaced `@Volatile Boolean`
+   (check-then-set race) with `AtomicBoolean` + `compareAndSet(false, true)` in
+   `onGmailNotification()`. Only one notification can win the CAS; all others return early.
+   `finally { isProcessing.set(false) }` moved to the `scope.launch {}` wrapper so it fires
+   unconditionally even if processing throws. Removed redundant `isProcessing = true` and
+   `finally` blocks from `processFromHistory()` and `processUnread()`.
+3. **llama_jni.cpp v1.6 — toJavaString() JNI exception hygiene**: Added
+   `ExceptionCheck()+ExceptionClear()` before every fallback `NewStringUTF("")` call that
+   follows a failed allocation (NewByteArray, FindClass, NewObject). Per JNI spec, calling
+   most JNI functions with a pending exception is undefined behaviour. Added null-check for
+   `FindClass` return value and null-check for `charset` before `DeleteLocalRef`.
+   Inference path and toJavaString call site are unchanged.
+4. **MessageEngine.kt v1.9 — Chat conversation history**: The "genuine conversation" else
+   branch in `handleAdminCommand()` now persists exchanges to `ConversationHistoryDatabase`
+   (contactKey="owner", channel="CHAT"). Loads last `CONTEXT_WINDOW_TURNS` (6) turns before
+   generating reply; records user input and stripped AI reply after. Applies only to
+   `channel == CHAT` (not remote admin commands). `historyDao` null-safe — early messages
+   before service starts are handled gracefully (load returns [], record is no-op).
+- Build: versionCode 68, versionName 1.6.0
+
+### v1.5.5 — Medium/low priority improvements: JSON parsing, Gmail batch, KV cache, theme (2026-03-01)
 Four improvements from the v1.5.4 code audit backlog:
 
 1. **AiEngine.kt v1.5 — Robust JSON command parsing**: Replaced `extractJsonValue()` regex with
@@ -162,311 +190,6 @@ Traced complete execution paths for all four crash scenarios.
    pre-existing issues (ContactEngine thread safety, EmailMonitor race, toJavaString OOM edge).
 - Build: versionCode 66, versionName 1.5.4
 
-### v1.5.3 — Code audit: fix 3 crashes + JNI UTF-8 safety (2026-03-01)
-Four fixes from comprehensive code audit cross-verification against actual codebase:
-
-1. **Settings Hub crash** — `SettingsHubActivity.kt`: `addDivider()` called
-   `setBackgroundResource(android.R.attr.listDivider)`, passing an attribute ID (0x010100a2)
-   as a drawable resource ID. `setBackgroundResource()` calls `resources.getDrawable(id)`
-   which throws `Resources.NotFoundException` for attribute IDs — crash on every Settings open.
-   The `setBackgroundColor()` line directly after it was unreachable (dead code after throw).
-   Fix: removed the `setBackgroundResource()` call; `setBackgroundColor(0x1AFFFFFF)` is sufficient.
-2. **LLM chat crash** — `llama_jni.cpp` v1.3: `env->NewStringUTF(result.c_str())` at line 207
-   requires Modified UTF-8. LLMs commonly produce emoji and supplementary Unicode (U+10000+)
-   which are valid standard UTF-8 but NOT Modified UTF-8. Passing them causes JNI to call
-   `abort()` — process dies immediately, uncatchable by Kotlin `catch (e: Throwable)`.
-   Warm-up used 4 ASCII tokens (passed); `generateSmsReply()` at temp=0.7 produced emoji → crash.
-   Fix: added `toJavaString()` helper that creates Java byte array from raw bytes and constructs
-   `String` via `new String(bytes, "UTF-8")`. Replaced `NewStringUTF(result.c_str())` with
-   `toJavaString(env, result)` — handles all Unicode including 4-byte supplementary chars.
-3. **Main thread Room access** — `ChatActivity.kt`: `ContactEngine.init(applicationContext)`
-   in `onCreate()` ran on the main thread, calling Room DAO `getAll()` and `insert()`.
-   Modern Android enforces IO-thread-only Room access. Not crashing only because `loadFromRoom()`
-   and `persistContact()` both have `try/catch (e: Exception)` that silently swallows the error.
-   Fix: wrapped in `scope.launch(Dispatchers.IO) { ... }`.
-4. **AiEngine warmUp exception width** — `AiEngine.kt` v1.4: `warmUp()` used
-   `catch (e: Exception)` which does not intercept `OutOfMemoryError` or other `Error` subclasses
-   that can occur during LLM inference. An uncaught `Error` in `warmUp()` would propagate and
-   set engine state to ERROR, blocking all AI for the session.
-   Fix: widened to `catch (e: Throwable)` — consistent with rest of engine error handling.
-- Build: versionCode 65, versionName 1.5.3
-
-### v1.5.2 — Fix ColorStateList crash: night-mode colors + statusBarColor (2026-03-01)
-Three root-cause fixes for persistent "Can't find ColorStateList from drawable resource ID" crash:
-
-1. **`values-night/colors.xml`** — Color names were `primary`/`onPrimary` (old names that caused
-   Material3 internal conflicts). Previous session renamed them in `values/colors.xml` but forgot
-   the night qualifier file. Renamed to `aigentik_primary`/`aigentik_on_primary` to match.
-2. **`themes.xml`** — `android:statusBarColor` was set to `?android:attr/windowBackground`.
-   In Material3, `windowBackground` resolves to a **Drawable** resource (not a color), causing
-   the ColorStateList crash whenever Android tried to apply the status bar color. Fixed to
-   `?attr/colorSurface` which is a proper Material3 color attribute.
-3. **`OnboardingActivity.kt`** — Switched notification access dialogs from
-   `AlertDialog.Builder(this)` to `MaterialAlertDialogBuilder(this)` for correct Material3
-   dialog rendering (prevents theme resolution issues during dialog inflation).
-4. **`values/styles.xml`** — `ChatBubble.User` style had `android:textColor = @color/onPrimary`
-   (old color name). This was the last remaining reference to the old name — caused aapt2 build
-   error `resource color/onPrimary not found`. Fixed to `@color/aigentik_on_primary`.
-- Build: versionCode 64, versionName 1.5.2
-
-### v1.5.1 — UI Modernization: Settings Hub, auto-advance onboarding (2026-02-28)
-Modern navigation pattern — replaces left drawer with settings gear icon and clean hub screen.
-
-1. **Onboarding auto-advance** — `OnboardingActivity.kt` v2.1: After Google sign-in success,
-   `tryAutoAdvance()` checks if owner name and phone are filled. If yes, auto-saves settings
-   and chains through permissions → model → chat without requiring "Get Started" tap.
-   Button text changed from "Create Account" to "Get Started".
-2. **Drawer removed from ChatActivity** — `ChatActivity.kt` v1.1: Removed `DrawerLayout`,
-   `NavigationView`, `setupNavigation()`, `updateDrawerHeader()`. Layout flattened to plain
-   `LinearLayout`. Hamburger menu replaced with gear icon (`ic_settings.xml`) that opens
-   `SettingsHubActivity`. Send button now uses green circle background (`send_button_bg.xml`).
-3. **SettingsHubActivity created** — `SettingsHubActivity.kt` v1.0 + layout: Clean list screen
-   with 7 clickable rows: Profile & Account, Google Account, Appearance, AI Model, Message
-   Rules, AI Diagnostic, About. Dynamic subtitles show current state (owner name, email,
-   theme, model info). Back arrow returns to chat. Registered in AndroidManifest.
-4. **Back navigation on all sub-activities** — Added header bar with back arrow (`ic_arrow_back.xml`)
-   and title to: SettingsActivity, ModelManagerActivity, RuleManagerActivity, AiDiagnosticActivity.
-   Each layout wrapped in outer LinearLayout with header bar + divider above ScrollView.
-   Each Activity's `onCreate()` wires `btnBack.setOnClickListener { finish() }`.
-5. **New drawables** — `ic_arrow_back.xml` (Material back arrow, 24dp), `ic_settings.xml`
-   (Material gear, 24dp), `send_button_bg.xml` (green circle for send button).
-6. **Cleanup** — `drawer_menu.xml` and `nav_header.xml` emptied (no longer referenced).
-- Build: versionCode 62, versionName 1.5.1
-
-### v1.4.10 — Fix chat/NL crash: null-safe generate(), AigentikPersona integrated (2026-02-28)
-Three defensive fixes for chat message and natural language instruction crashes:
-
-1. **`AiEngine.kt` v1.3 — Null-safe `llama.generate()` calls**:
-   - `nativeGenerate()` is a JNI external function; it can return null (e.g. OOM on C++ side).
-   - Previously all three call sites (`generateSmsReply`, `generateEmailReply`, `interpretCommand`)
-     called `.trim()` directly on the return value → NullPointerException.
-   - `generateSmsReply`/`generateEmailReply` had no inner try/catch, so the NPE propagated
-     out of the suspend function and into `handleAdminCommand`'s catch block — user saw
-     "⚠️ Error: null" instead of a real response, or the app crashed.
-   - Fix: all three sites now use `?.trim() ?: ""` with a `catch (e: Throwable)` wrapping
-     the `generate()` call. Null/error → empty string → fallback response used instead.
-   - Added `Log.d(TAG, "invoking llama.generate()")` before each call for crash-triage.
-2. **`MessageEngine.kt` v1.8 — `catch (e: Throwable)` in `handleAdminCommand`**:
-   - Previous `catch (e: Exception)` did not catch `OutOfMemoryError`, `StackOverflowError`,
-     or other `Error` subclasses that can occur during LLM inference.
-   - When an uncaught `Error` escaped the try block, `chatNotifier` was never called, leaving
-     the chat UI stuck in "Thinking..." for 45 seconds then silently timing out.
-   - Fix: widened to `catch (e: Throwable)`. Error message always delivered to chat.
-   - Added `Log.i` at entry and before `interpretCommand`/`generateSmsReply` calls.
-3. **`AigentikPersona` integrated into `handleAdminCommand`**:
-   - `AigentikPersona` was defined but never called. Identity/privacy/capability queries
-     ("who are you", "what can you do", "is my data safe", etc.) triggered full LLM inference
-     unnecessarily — wasted 5-30s and risked inference errors.
-   - Fix: `AigentikPersona.respond(input)` checked first in `handleAdminCommand`. If it
-     returns non-null, the response is delivered immediately without going through the AI.
-   - Also fixed `AiEngine.configure()` to sync `AigentikPersona.name`/`ownerName` so persona
-     responses use the actual agent/owner names from settings (were stuck at defaults).
-- Build: versionCode 60, versionName 1.4.10
-
-### v1.4.9 — Fix email notification crash + rule manager crash (2026-02-28)
-Two runtime crashes fixed:
-
-1. **`MessageEngine.kt` v1.7 — EMAIL channel fix in `handlePublicMessage()`**:
-   - Was calling `ContactEngine.findOrCreateByPhone(sender)` for EMAIL channel — email address
-     treated as a phone number, creating wrong contact data.
-   - Was calling `RuleEngine.checkSms()` for EMAIL channel — email messages checked against
-     SMS rules instead of email rules, could miss applicable email rules.
-   - Fix: Added EMAIL-specific branches: `findOrCreateByEmail()` for contact lookup and
-     `checkEmail(subject, body)` for rule checking.
-   - Added `CoroutineExceptionHandler` to MessageEngine scope — prevents any uncaught
-     coroutine exception from crashing the app process.
-2. **`ContactEngine.kt` — Added `findOrCreateByEmail()`**:
-   - New method parallel to `findOrCreateByPhone()`: looks up by email, creates with
-     `source = "email"` and adds to emails list if not found.
-3. **`RuleEngine.kt` v0.6 — Async DAO writes**:
-   - `addSmsRule()`, `addEmailRule()`, `removeRule()` were calling `dao.insert()` /
-     `dao.deleteByIdentifier()` synchronously on the calling thread.
-   - `RuleManagerActivity` calls these from Button click listeners (main thread) →
-     `IllegalStateException: Cannot access database on the main thread`.
-   - Fix: Added `ioScope` (Dispatchers.IO + SupervisorJob). All three methods now dispatch
-     DAO writes to `ioScope.launch { }`. In-memory list updates remain synchronous (main
-     thread safe for immediate UI refresh).
-- Build: versionCode 59, versionName 1.4.9
-
-### v1.4.8 — Unified SMS/RCS via notification system (2026-02-28)
-Removed all direct SMS sending infrastructure. SMS and RCS now handled identically through
-the Samsung Messages notification system. Aigentik no longer requires SEND_SMS permission
-or default messaging app status.
-
-1. **Removed `SmsAdapter.kt`** — BroadcastReceiver for `SMS_RECEIVED` is no longer needed.
-   All incoming SMS/RCS arrive via Samsung Messages notifications (NotificationAdapter).
-2. **Removed `SmsRouter.kt`** — `SmsManager`-based SMS sending removed entirely. All outbound
-   SMS/RCS go through `NotificationReplyRouter.sendReply()` (inline reply via PendingIntent).
-3. **Removed permissions** — `RECEIVE_SMS`, `SEND_SMS`, `READ_SMS` removed from AndroidManifest.
-   Also removed `SmsAdapter` receiver registration.
-4. **`MessageEngine.kt` v1.6** — All `SmsRouter.send()` calls replaced:
-   - `send_sms` action returns: "Sending new messages is not in my capabilities — I can only reply to messages I receive."
-   - `replyToSender()` NOTIFICATION fallback: logs warning only (no SmsManager fallback)
-   - `handlePublicMessage()` inline reply failure: notifies owner that notification was dismissed
-   - Keyword fallback "text"/"send" branch: same capability message as above
-   - `sendReply()` public function: logs warning, no-op
-5. **`AigentikService.kt`** — Removed `SmsRouter.init()` call and import.
-- Build: versionCode 58, versionName 1.4.8
-
-### v1.4.7 — Gmail forensic audit implementation (2026-02-28)
-Implemented all items from aigentik-gmail-review.md (Gmail Forensic Audit):
-
-1. **CRITICAL: OAuth scope resolution** — `GoogleAuthManager.kt` v1.8: `getFreshToken()` now
-   catches `UserRecoverableAuthException` specifically (was silently caught by generic Exception).
-   Stores resolution Intent in `pendingScopeIntent`. Added `scopeResolutionListener` callback,
-   `gmailScopesGranted` flag, `lastTokenError` diagnostic string. This was the root cause
-   of Gmail being non-functional — the consent dialog for restricted scopes never appeared.
-2. **Gmail scope consent flow** — `SettingsActivity.kt` v2.2: After Google sign-in, automatically
-   attempts `getFreshToken()` to trigger Gmail scope consent. Registers `scopeResolutionListener`
-   in `onResume()` to auto-launch consent dialog. Handles `RC_GMAIL_CONSENT` activity result.
-   Added "Grant Gmail Permissions" button (orange, visible when scopes pending).
-   Added `tvGmailScopeStatus` showing scope health. Calls `ConnectionWatchdog.checkNow()`
-   after sign-in and scope grant for immediate notification dismissal.
-3. **GmailApiClient error propagation** — `GmailApiClient.kt` v1.3: Added `lastError` volatile
-   field with HTTP-code-specific messages (401 auth expired, 403 access denied, 429 rate limit).
-   `get()`/`post()`/`postRaw()` all set `lastError`. Added `checkTokenHealth()` method calling
-   `users.getProfile` to verify token validity without side effects.
-4. **GmailHistoryClient silent failure fix** — `GmailHistoryClient.kt` v1.2: `primeHistoryId()`
-   now returns `PrimeResult` enum (ALREADY_STORED, PRIMED_FROM_API, NO_TOKEN, API_ERROR,
-   NETWORK_ERROR). Added `lastPrimeResult` for diagnostics. Specific error logging for 401/403.
-   `AigentikService.kt` updated to log specific prime result.
-5. **MessageEngine Gmail error messages** — `MessageEngine.kt` v1.5: Added `requireGmailReady()`
-   helper checking context, sign-in, and scope grant status. All 11 Gmail NL actions and keyword
-   fallback sections now use this helper. Users see specific messages: "Not signed in",
-   "Gmail permissions needed", instead of generic "Gmail not initialized" or silence.
-6. **Gmail diagnostic panel** — `AiDiagnosticActivity.kt` v1.1 + layout: Added Gmail Health
-   section showing sign-in status, scope grant status, historyId prime status. "Check Gmail
-   Token" button calls `checkTokenHealth()` to verify token reaches Gmail API.
-7. **ConnectionWatchdog scope monitoring** — `ConnectionWatchdog.kt` v2.2: Now monitors sign-in
-   + scope grant status. Separate notifications: "Sign-in Required" (2001) vs "Gmail Permissions
-   Needed" (2002). Added `checkNow()` for immediate check after SettingsActivity actions.
-8. **Settings layout** — `activity_settings.xml`: Added `tvGmailScopeStatus` and
-   `btnGrantGmailPerms` between sign-out and admin password sections.
-
-Items NOT implemented (documented in gmail-review-implementation-progress.md):
-- Credentials Manager API migration — future work (current GoogleSignIn works with fix)
-- WorkManager deep sync — CONFLICTS with no-polling policy; compliant alternative proposed
-- SHA-1 Registry — already fixed via GitHub Actions keystore (DEBUG_KEYSTORE_BASE64)
-
-- Build: versionCode 57, versionName 1.4.7
-
-### v1.4.6 — Full review implementation (2026-02-28)
-Implemented all items from aigentik-android-review.md (Gemini CLI review):
-
-1. **Temperature + top-p sampling** — `llama_jni.cpp` and `LlamaJNI.kt`: SMS/email replies
-   use temperature=0.7/topP=0.9 for natural varied output; interpretCommand() uses
-   temperature=0.0 (greedy) for reliable JSON action parsing.
-2. **ConnectionWatchdog notification** — posts high-priority "Sign-in Required" notification
-   when OAuth token expires; taps to SettingsActivity; auto-dismisses on recovery.
-3. **Room migration: ContactEngine** — `contacts.json` → `ContactDatabase` (Room/SQLite).
-   One-time migration on first launch. ContactEntity + ContactDao + ContactDatabase added.
-4. **Room migration: RuleEngine** — `sms_rules.json` + `email_rules.json` → `RuleDatabase`.
-   One-time migration. RuleEntity + RuleDao + RuleDatabase added.
-5. **Contextual memory** — Room-backed per-contact conversation history for SMS + email channels.
-   2-hour session gap resets context (topic drift prevention). Trimmed to 20 turns/contact.
-   ConversationTurn + ConversationHistoryDao + ConversationHistoryDatabase added.
-6. **Rule Manager UI** — new `RuleManagerActivity` + layout. Add/delete SMS and email rules
-   with condition type and action selectors. Accessible from Settings.
-7. **AI Diagnostic screen** — new `AiDiagnosticActivity` + layout. Shows native lib status,
-   model info, runs benchmark, shows tokens/sec and sample output.
-8. **Downloaded Models list** — `ModelManagerActivity` lists all .gguf files in modelsDir
-   with Load button per non-active model. Allows switching models without re-downloading.
-9. **Contact instructions via chat** — "always reply formally to John" now wired via
-   `set_contact_instructions` action through AiEngine → MessageEngine → ContactEngine.setInstructions().
-10. **Backup exclusion rules** — `backup_rules.xml` + `data_extraction_rules.xml` prevent
-    contacts.json, rules/, models/, and all databases from being backed up to Google/cloud.
-11. **DestructiveActionGuard improvements** — common word exclusion list prevents accidental
-    confirmation when common English words appear in confirmation message.
-12. **MessageDeduplicator improvement** — fingerprint body window 50 → 100 chars.
-13. **Native lib error state** — `LlamaJNI.isNativeLibLoaded()` + `AiEngine.getStateLabel()`
-    now shows "Native lib error" vs "Not loaded" for better diagnostics.
-14. **Version bump**: versionCode 56, versionName 1.4.6
-
-- Build: versionCode 56, versionName 1.4.6
-
-### v1.4.5 — Fix chat crash (2026-02-27)
-Fixed three bugs in ChatActivity that caused crashes and silent response failures when using chat:
-
-1. **`CoroutineScope` without `SupervisorJob`** — Plain `Job()` means any exception in one child
-   coroutine (sendMessage or observeMessages) cascades and cancels the whole scope → app crash.
-   Fixed: `CoroutineScope(Dispatchers.Main + SupervisorJob())`.
-2. **`MessageEngine.chatNotifier` never set by ChatActivity** — chatNotifier is set by
-   AigentikService on startup. If service wasn't running yet, or hadn't initialized, notify()
-   calls were silently dropped. Chat appeared to work but responses never appeared.
-   Fixed: ChatActivity.onCreate() now sets `MessageEngine.chatNotifier = { ChatBridge.post(it) }`.
-3. **`ContactEngine.init()` never called from ChatActivity** — Local commands like "status"
-   and "find [name]" call ContactEngine methods. Without init(), these threw NPE, which (before
-   SupervisorJob fix) crashed the whole scope.
-   Fixed: `ContactEngine.init(applicationContext)` in onCreate().
-4. **No error handling in sendMessage()** — Added try-catch around the full sendMessage body.
-   Errors now show as an assistant message in chat instead of silently crashing.
-5. **scope.cancel() missing from onDestroy()** — Scope kept running after activity destroyed.
-   Fixed: scope.cancel() added to onDestroy().
-
-- Build: versionCode 55, versionName 1.4.5
-
-### v1.4.4 — Chat routes through MessageEngine (2026-02-27, superseded by v1.4.5 same session)
-Complete rewrite of ChatActivity. Root cause: old ChatActivity had generateResponse() that called
-LlamaJNI.generate() directly with a generic "you are a personal AI assistant" prompt, bypassing
-MessageEngine and all Gmail/SMS/contacts tools entirely. No crash fix was included in v1.4.4;
-v1.4.5 added the crash fixes on top.
-- Build: versionCode 54, versionName 1.4.4
-
-### v1.4.3 — Email NL keyword fixes (2026-02-27)
-Fixed MessageEngine and AiEngine so email queries from chat actually show emails:
-- **MessageEngine.kt** — keyword fallback `else` block was matching email queries but only
-  returning "Email monitor: active ✅" status instead of actual emails. Replaced with
-  `GmailApiClient.listUnreadSummary(ctx, 20)`. Added `GoogleAuthManager.isSignedIn(ctx)` check
-  before any Gmail API call — shows clear "Not signed in" error instead of empty result.
-  Added "how many" as an unread count trigger keyword.
-- **AiEngine.kt** — added more interpretCommand() examples for natural phrasing:
-  "any new emails", "what emails haven't I read", "could you check my emails", "check my inbox".
-  Added corresponding parseSimpleCommand() fallback patterns.
-- Build: versionCode 53, versionName 1.4.3
-
-### v1.4.2 — Google Voice improvements (2026-02-27)
-Applied GVoice parsing improvements from Termux beta version to the Android app:
-- **GmailApiClient.kt v1.2** — added group text detection (`New group text message` subject prefix).
-  Strip GVoice footer ("To respond to this text message, reply to this email...") before passing
-  body to AI — was polluting the AI context. Strip HTML tags from email body. For group texts,
-  use fromEmail as the routing identifier since phone number is not in the subject.
-- Build: versionCode 52, versionName 1.4.2
-
-### v1.4.1 — Gmail notification-listener trigger (2026-02-27)
-REVERT of Pub/Sub approach added in v1.4.0. Replaced with on-device notification pattern.
-- **GmailHistoryClient.kt v1.1** — added on-device historyId persistence (SharedPreferences),
-  added primeHistoryId() using Gmail profile API (GET .../me/profile → historyId field)
-- **EmailMonitor.kt v4.0** — complete rewrite: notification-triggered only, no polling loop.
-  Uses GmailHistoryClient when historyId stored (delta fetch), falls back to listUnread().
-  isProcessing flag prevents overlapping fetches from rapid notification bursts.
-- **AigentikService.kt v1.5** — removed GmailPushManager import, replaced startPushPolling()
-  with GmailHistoryClient.primeHistoryId() in a non-blocking coroutine on start.
-- **GoogleAuthManager.kt v1.7** — removed pubsub scope from GMAIL_SCOPES.
-- **GmailPushManager.kt** — DELETED (Pub/Sub cloud relay violates no-cloud policy).
-- Build: versionCode 51, versionName 1.4.1
-
-### v1.4.0 — Gmail NL interface + auto-reply (2026-02-27, partially reverted)
-Gmail NL interface (KEPT), Pub/Sub trigger (REVERTED in v1.4.1).
-- **GmailApiClient.kt** — added: getEmailMetadata(), listUnreadSummary(), countUnreadBySender(),
-  searchEmailIds(), batchMarkRead(), emptyTrash(), getOrCreateLabel(), addLabel(), getUnsubscribeLink()
-- **AiEngine.kt** — added query field to CommandResult; 11 new Gmail actions in interpretCommand();
-  expanded parseSimpleCommand() with Gmail patterns
-- **MessageEngine.kt v1.3** — added appContext, channelKey() helper; 11 Gmail action handlers;
-  EMAIL channel now uses generateEmailReply()
-- **DestructiveActionGuard.kt** — updated confirmWithPassword() to extract admin code word-by-word
-- **Message.kt** — added subject field
-- Build: versionCode 50, versionName 1.4.0
-
-### v1.3.8 — App icon update (2026-02-26)
-Updated launcher icon to Aigentik brand image, using mipmap launcher icons.
-- Build: versionCode ~48, versionName 1.3.8
-
-### v1.3.3 — Full codebase audit and fixes (2026-02-26)
-CRITICAL: Service startup gate removed, SEND_SMS permission added, ChatBridge init in service.
-HIGH: send_email command wired, Gmail notifications routed correctly.
-CLEANUP: version bump, SHA-1 corrected, constraintlayout 2.1.4, gmailAppPassword deprecated.
-
----
 
 ## NAVIGATION ARCHITECTURE (v1.5.1)
 
@@ -688,14 +411,14 @@ Fixed keystore SHA-1 resolves ApiException code 10.
    service overwrites with the same lambda. This is fine but worth monitoring if behavior diverges.
 4. **ContactEngine IO-thread init** — ContactEngine.init() dispatched to IO in ChatActivity (v1.5.3).
    AigentikService still calls it on its own IO coroutine scope. Both paths are now IO-safe.
-   Note: if both execute near-simultaneously, the shared in-memory `contacts` list may be written
-   concurrently. Harmless in practice (both load the same data) but not thread-safe for writes.
-   Low priority for now.
+   If both execute near-simultaneously, `loadFromRoom()` does two atomic reference swaps —
+   the second wins. Both load identical Room data. `CopyOnWriteArrayList` handles concurrent
+   `add()` calls safely. Fully resolved in v1.6.0 (ContactEngine v0.6).
 5. **MessageEngine.appContext null if service never ran** — Gmail ops now show specific error
    ("Gmail not initialized — restart app") instead of silence. Could still improve by adding
    MessageEngine.initContext(ctx) from ChatActivity.
-6. **Conversation history in chat** — ConversationHistoryDatabase only populated for public
-   messages (SMS/email). Chat (admin) messages not stored in history.
+6. **Conversation history in chat** — FIXED in v1.6.0 (MessageEngine v1.9). Chat messages
+   now persisted to ConversationHistoryDatabase (contactKey="owner", channel="CHAT").
 7. **Credentials Manager migration** — GoogleSignIn is legacy but works. Migration to
    Credentials Manager API planned for future version (requires minSdk 28).
 8. **Gmail scope status persistence** — `gmailScopesGranted` is in-memory only. If the app

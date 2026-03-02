@@ -16,7 +16,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-// MessageEngine v1.8
+// MessageEngine v1.9
+// v1.9: Chat conversation history persistence.
+//   Admin chat (CHAT channel) "genuine conversation" branch now persists exchanges
+//   to ConversationHistoryDatabase under contactKey="owner", channel="CHAT". This
+//   allows multi-turn chat continuity — the AI receives the last CONTEXT_WINDOW_TURNS
+//   turns as context when generating a reply. Only applies when message.channel==CHAT
+//   (not remote admin commands). historyDao null-safety preserved — if historyDao is
+//   not yet initialized (service not started), loadHistory returns [] and recordHistory
+//   is a no-op; no crash, just no history for those early messages.
 // v1.8: Defensive hardening for chat/NL crash:
 //   1. AigentikPersona.respond() checked before interpretCommand() — identity queries
 //      answered instantly without LLM inference (no NPE risk, no 30s wait).
@@ -678,9 +686,25 @@ object MessageEngine {
                             // Genuine conversation — use AI
                             if (AiEngine.isReady()) {
                                 Log.d(TAG, "handleAdminCommand: generating AI chat reply")
+                                // Load prior chat turns for multi-turn context (CHAT channel only).
+                                // historyDao null-safe: loadHistory returns [] if not yet configured.
+                                val chatHistory = if (message.channel == Message.Channel.CHAT)
+                                    loadHistory("owner", "CHAT") else emptyList()
+                                // Record the user's input before generation (consistent with handlePublicMessage).
+                                if (message.channel == Message.Channel.CHAT) {
+                                    recordHistory("owner", "CHAT", "user", input)
+                                }
                                 val reply = AiEngine.generateSmsReply(
-                                    ownerName, adminNumber, input, null, null
+                                    ownerName, adminNumber, input, null, null, chatHistory
                                 )
+                                // Record Aigentik's reply (strip signature for cleaner context).
+                                if (message.channel == Message.Channel.CHAT) {
+                                    val replyForHistory = reply
+                                        .substringBefore("\n\n—")
+                                        .substringBefore("\n\n---")
+                                        .trim()
+                                    recordHistory("owner", "CHAT", "assistant", replyForHistory)
+                                }
                                 notify(reply)
                             } else {
                                 notify("Try: status, channels, find [name], text [name] [msg], stop/start sms/email/gvoice")

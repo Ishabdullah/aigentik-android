@@ -5,8 +5,20 @@ import android.provider.ContactsContract
 import android.util.Log
 import org.json.JSONArray
 import java.io.File
+import java.util.concurrent.CopyOnWriteArrayList
 
-// ContactEngine v0.5
+// ContactEngine v0.6
+// v0.6: Thread-safe in-memory cache.
+//   - contacts changed from mutableListOf() (ArrayList, NOT thread-safe) to
+//     CopyOnWriteArrayList. Reads (find, filter, getCount) are now lock-free and safe
+//     from any thread including Main (resolveLocalCommand) and IO (MessageEngine,
+//     AigentikService).
+//   - loadFromRoom() now atomically replaces the reference
+//     (contacts = CopyOnWriteArrayList(newList)) instead of clear()+addAll(), so
+//     readers either see the old complete list or the new complete list — never an
+//     empty intermediate state during initialization.
+//   - All writes (add in findOrCreateByPhone/Email, syncAndroidContacts) are
+//     thread-safe via CopyOnWriteArrayList's copy-on-write semantics.
 // v0.5: Migrated from JSON-backed storage to Room/SQLite (ContactDatabase).
 //   - Better data integrity: atomic writes via Room transaction, no corruption risk
 //   - Better performance at scale: indexed queries vs full JSON parse/write
@@ -37,8 +49,11 @@ object ContactEngine {
         val source: String = "auto"
     )
 
-    // In-memory cache loaded from Room on init — fast lookups, Room for persistence
-    private val contacts = mutableListOf<Contact>()
+    // In-memory cache loaded from Room on init — fast lookups, Room for persistence.
+    // CopyOnWriteArrayList: lock-free reads from any thread (Main/IO), thread-safe writes.
+    // Reference is @Volatile so the atomic replacement in loadFromRoom() is visible immediately.
+    @Volatile
+    private var contacts = CopyOnWriteArrayList<Contact>()
     private var dao: ContactDao? = null
     private var appContext: Context? = null
 
@@ -197,12 +212,13 @@ object ContactEngine {
         }
     }
 
-    // Load all contacts from Room into in-memory cache
+    // Load all contacts from Room into in-memory cache.
+    // Atomically replaces the reference so no reader ever sees an empty intermediate state
+    // (clear()+addAll() would expose a gap between clear and addAll to concurrent readers).
     private fun loadFromRoom() {
         try {
             val entities = dao?.getAll() ?: emptyList()
-            contacts.clear()
-            contacts.addAll(entities.map { it.toContact() })
+            contacts = CopyOnWriteArrayList(entities.map { it.toContact() })
             Log.i(TAG, "Loaded ${contacts.size} contacts from Room")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load contacts from Room: ${e.message}")

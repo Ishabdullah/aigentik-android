@@ -9,8 +9,18 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 
-// EmailMonitor v4.0 — on-device notification-triggered Gmail processing
+// EmailMonitor v4.1 — on-device notification-triggered Gmail processing
+//
+// v4.1: Fixed isProcessing race condition.
+//   Previous: @Volatile Boolean checked in onGmailNotification() but set to true INSIDE
+//   the launched coroutine. Two rapid notifications could both pass the check (both see
+//   false) before either coroutine body ran, launching two concurrent fetch coroutines.
+//   Fix: replaced with AtomicBoolean + compareAndSet(false, true) in onGmailNotification().
+//   compareAndSet atomically reads+writes in one operation — only one caller can win.
+//   The winner sets it true; all others see true and return early. The finally { set(false) }
+//   is in the scope.launch wrapper so it always executes even if the coroutine throws.
 //
 // Trigger: Gmail app posts a notification → NotificationAdapter.onNotificationPosted()
 //          detects package=com.google.android.gm → calls onGmailNotification()
@@ -32,7 +42,9 @@ object EmailMonitor {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    @Volatile private var isProcessing = false
+    // AtomicBoolean: compareAndSet(false, true) is a single atomic read+write operation.
+    // This eliminates the race window that existed with @Volatile Boolean (check then set).
+    private val isProcessing = AtomicBoolean(false)
     private var appContext: Context? = null
 
     // Called once by AigentikService.onCreate()
@@ -51,97 +63,94 @@ object EmailMonitor {
             Log.w(TAG, "Gmail notification received but not signed in — ignoring")
             return
         }
-        if (isProcessing) {
+        // compareAndSet(false, true): atomically check-and-set in one operation.
+        // Only one caller can win (transitions false→true). All others see true and return.
+        if (!isProcessing.compareAndSet(false, true)) {
             Log.d(TAG, "Already processing — skipping duplicate notification trigger")
             return
         }
         Log.i(TAG, "Gmail notification received — triggering fetch")
         scope.launch {
-            val storedHistoryId = GmailHistoryClient.loadHistoryId(context)
-            if (storedHistoryId != null) {
-                Log.d(TAG, "History API path — historyId=$storedHistoryId")
-                processFromHistory(context, storedHistoryId)
-            } else {
-                Log.d(TAG, "No historyId stored — using listUnread fallback")
-                processUnread(context)
+            try {
+                val storedHistoryId = GmailHistoryClient.loadHistoryId(context)
+                if (storedHistoryId != null) {
+                    Log.d(TAG, "History API path — historyId=$storedHistoryId")
+                    processFromHistory(context, storedHistoryId)
+                } else {
+                    Log.d(TAG, "No historyId stored — using listUnread fallback")
+                    processUnread(context)
+                }
+            } finally {
+                // Always release the lock — even if processFromHistory/processUnread throws.
+                isProcessing.set(false)
             }
         }
     }
 
     // ─── History-based processing (primary, when historyId available) ──────────
 
+    // No try/finally needed here — isProcessing is reset in onGmailNotification's launch wrapper.
+    // Any exception from this function propagates to the launch wrapper's finally { isProcessing.set(false) }.
     private suspend fun processFromHistory(context: Context, startHistoryId: String) {
-        isProcessing = true
-        try {
-            val (msgIds, updatedHistoryId) = GmailHistoryClient.getNewInboxMessageIds(
-                context, startHistoryId
-            )
+        val (msgIds, updatedHistoryId) = GmailHistoryClient.getNewInboxMessageIds(
+            context, startHistoryId
+        )
 
-            // 404 from History API means historyId was purged (too old)
-            // Reset by re-priming from Gmail profile
-            if (updatedHistoryId == null && msgIds.isEmpty()) {
-                Log.w(TAG, "historyId expired — re-priming from Gmail profile")
-                GmailHistoryClient.primeHistoryId(context)
-                return
-            }
+        // 404 from History API means historyId was purged (too old)
+        // Reset by re-priming from Gmail profile
+        if (updatedHistoryId == null && msgIds.isEmpty()) {
+            Log.w(TAG, "historyId expired — re-priming from Gmail profile")
+            GmailHistoryClient.primeHistoryId(context)
+            return
+        }
 
-            if (msgIds.isNotEmpty()) {
-                Log.i(TAG, "Processing ${msgIds.size} new email(s) via History API")
-                val ownEmail = GoogleAuthManager.getSignedInEmail(context) ?: ""
-                for (msgId in msgIds) {
-                    try {
-                        val email = GmailApiClient.getFullEmail(context, msgId) ?: continue
-                        if (!email.isUnread) {
-                            Log.d(TAG, "Skipping already-read email: $msgId")
-                            continue
-                        }
-                        // Skip own emails — prevents auto-reply loop
-                        if (email.fromEmail.equals(ownEmail, ignoreCase = true)) {
-                            Log.d(TAG, "Skipping own email: $msgId")
-                            continue
-                        }
-                        processEmail(context, email)
-                        GmailApiClient.markAsRead(context, email.gmailId)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to process email $msgId: ${e.message}")
+        if (msgIds.isNotEmpty()) {
+            Log.i(TAG, "Processing ${msgIds.size} new email(s) via History API")
+            val ownEmail = GoogleAuthManager.getSignedInEmail(context) ?: ""
+            for (msgId in msgIds) {
+                try {
+                    val email = GmailApiClient.getFullEmail(context, msgId) ?: continue
+                    if (!email.isUnread) {
+                        Log.d(TAG, "Skipping already-read email: $msgId")
+                        continue
                     }
+                    // Skip own emails — prevents auto-reply loop
+                    if (email.fromEmail.equals(ownEmail, ignoreCase = true)) {
+                        Log.d(TAG, "Skipping own email: $msgId")
+                        continue
+                    }
+                    processEmail(context, email)
+                    GmailApiClient.markAsRead(context, email.gmailId)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to process email $msgId: ${e.message}")
                 }
             }
-
-            // Always advance historyId after a successful History API call
-            val newHistoryId = updatedHistoryId ?: startHistoryId
-            GmailHistoryClient.saveHistoryId(context, newHistoryId)
-
-        } finally {
-            isProcessing = false
         }
+
+        // Always advance historyId after a successful History API call
+        val newHistoryId = updatedHistoryId ?: startHistoryId
+        GmailHistoryClient.saveHistoryId(context, newHistoryId)
     }
 
     // ─── listUnread fallback (when no historyId stored) ────────────────────────
 
+    // No try/finally needed here — isProcessing is reset in onGmailNotification's launch wrapper.
     private suspend fun processUnread(context: Context) {
-        isProcessing = true
-        try {
-            val emails = GmailApiClient.listUnread(context, maxResults = 10)
-            if (emails.isEmpty()) {
-                Log.d(TAG, "Fallback: no unread emails")
-                return
+        val emails = GmailApiClient.listUnread(context, maxResults = 10)
+        if (emails.isEmpty()) {
+            Log.d(TAG, "Fallback: no unread emails")
+            return
+        }
+        Log.i(TAG, "Fallback: processing ${emails.size} unread email(s)")
+        val ownEmail = GoogleAuthManager.getSignedInEmail(context) ?: ""
+        for (email in emails) {
+            try {
+                if (email.fromEmail.equals(ownEmail, ignoreCase = true)) continue
+                processEmail(context, email)
+                GmailApiClient.markAsRead(context, email.gmailId)
+            } catch (e: Exception) {
+                Log.e(TAG, "Fallback email processing failed: ${e.message}")
             }
-            Log.i(TAG, "Fallback: processing ${emails.size} unread email(s)")
-            val ownEmail = GoogleAuthManager.getSignedInEmail(context) ?: ""
-            for (email in emails) {
-                try {
-                    if (email.fromEmail.equals(ownEmail, ignoreCase = true)) continue
-                    processEmail(context, email)
-                    GmailApiClient.markAsRead(context, email.gmailId)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Fallback email processing failed: ${e.message}")
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "processUnread fallback failed: ${e.message}")
-        } finally {
-            isProcessing = false
         }
     }
 
@@ -208,7 +217,7 @@ object EmailMonitor {
 
     // ─── Compat stubs ──────────────────────────────────────────────────────────
 
-    fun isRunning(): Boolean = !isProcessing
+    fun isRunning(): Boolean = !isProcessing.get()
     fun start()  { Log.i(TAG, "EmailMonitor v4 — triggered by Gmail app notifications") }
     fun stop()   { Log.i(TAG, "EmailMonitor v4 stopped") }
 }

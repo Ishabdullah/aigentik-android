@@ -258,14 +258,125 @@ ModelManagerActivity, RuleManagerActivity, AiDiagnosticActivity, MainActivity.
 Also added `AigentikSettings.init(this)` + import to RuleManagerActivity (was missing — could
 throw `UninitializedPropertyAccessException` on `prefs` if launched without a prior activity).
 
-### Remaining Open Issues (Not Fixed in v1.5.5)
+### Remaining Open Issues (Not Fixed in v1.5.5 — all fixed in v1.6.0)
 
-1. **ContactEngine thread safety** — `mutableListOf<Contact>()` is not thread-safe. Pre-existing.
-   Low practical risk; a future fix should use `CopyOnWriteArrayList`.
-2. **EmailMonitor.isProcessing race** — flag checked before coroutine launch but set inside it.
-   Pre-existing. Worst case: duplicate email fetch. `markAsRead()` prevents double-replies.
-3. **toJavaString() OOM edge case** — pending exception after OOM during `NewObject()`.
-   Theoretical. Correct fix: `ExceptionCheck()` + `ExceptionClear()` before the fallback.
-   Not a crash-level risk on any shipping Android version.
-4. **Conversation history in chat** — `ConversationHistoryDatabase` only populated for
-   public messages (SMS/email). Chat (admin) messages not stored in conversation history.
+1. **ContactEngine thread safety** — FIXED in v1.6.0 (see below).
+2. **EmailMonitor.isProcessing race** — FIXED in v1.6.0 (see below).
+3. **toJavaString() OOM edge case** — FIXED in v1.6.0 (see below).
+4. **Conversation history in chat** — FIXED in v1.6.0 (see below).
+
+---
+
+## v1.6.0 — Stability Hardening: Thread Safety, Race Fix, JNI Hygiene, Chat History
+
+### 1. ContactEngine Thread Safety — FIXED ✅
+**Previous:** `contacts = mutableListOf<Contact>()` — a plain `ArrayList`, not thread-safe.
+Concurrent access paths:
+- IO thread: `init()` → `loadFromRoom()` (write: clear+addAll) and `syncAndroidContacts()` (add)
+- Main thread: `resolveLocalCommand()` reads `contacts` via `findContact()`, `getCount()`
+- IO thread: `MessageEngine.handlePublicMessage()` reads and writes contacts
+
+The `clear()+addAll()` sequence in `loadFromRoom()` exposed a window where concurrent readers
+could observe an empty list between the clear and the addAll.
+
+**Fix:** Changed to `@Volatile CopyOnWriteArrayList<Contact>`.
+- `loadFromRoom()` now does `contacts = CopyOnWriteArrayList(newList)` — atomic reference
+  replacement. Readers either see the old complete list or the new complete list, never empty.
+- Reads (`find`, `filter`, `size`) are lock-free — no blocking on Main thread.
+- Writes (`add` in `findOrCreate*`, `syncAndroidContacts`) use CopyOnWriteArrayList's
+  copy-on-write semantics — thread-safe without locking.
+- `@Volatile` on the reference ensures the assignment in `loadFromRoom()` is immediately
+  visible to all threads (Java memory model visibility guarantee).
+
+**Regression prevention:** CopyOnWriteArrayList has identical API to ArrayList for all
+operations used (add, find via iterator, filter). No behavioral change in any code path.
+
+### 2. EmailMonitor isProcessing Race — FIXED ✅
+**Previous:** `@Volatile private var isProcessing = false`.
+Race window: flag was *checked* in `onGmailNotification()` (on the notification listener thread)
+but *set to true* inside the `scope.launch { }` body (on an IO thread). Two rapid Gmail
+notifications arriving in quick succession could both pass the `if (isProcessing)` check before
+either coroutine ran and set the flag, launching two concurrent fetch coroutines.
+
+**Fix:** Replaced with `private val isProcessing = AtomicBoolean(false)`.
+- `onGmailNotification()` now uses `compareAndSet(false, true)` — a single atomic
+  read-modify-write operation. Only one caller can transition false→true; all others see
+  `true` and return early. No scheduling gap exists.
+- The `finally { isProcessing.set(false) }` is in the `scope.launch { }` wrapper, so it
+  executes unconditionally even if `processFromHistory` or `processUnread` throws.
+- Removed redundant `isProcessing = true` from `processFromHistory()` and `processUnread()`,
+  and removed their `finally { isProcessing = false }` blocks (now handled by the wrapper).
+
+**Regression prevention:** `isRunning()` updated to `!isProcessing.get()`. All existing
+callers unchanged. Worst-case scenario (duplicate fetch) was prevented before by `markAsRead()`;
+the fix eliminates the condition itself.
+
+### 3. toJavaString() JNI Exception Hygiene — FIXED ✅
+**Previous:** After `NewObject()` failure (OOM during String construction), a pending Java
+exception exists. The subsequent `env->NewStringUTF("")` fallback was technically undefined
+behaviour per JNI spec when a pending exception is present (only a small set of JNI functions
+is safe to call with a pending exception).
+
+**Fix:** Added `ExceptionCheck()` + `ExceptionClear()` before every fallback `NewStringUTF("")`
+call that follows a potentially failing allocation:
+1. After `NewByteArray()` returns null — clear pending OOM before fallback.
+2. After `FindClass("java/lang/String")` returns null — clear + fallback.
+3. After `NewObject()` returns null — `if (!result && ExceptionCheck()) ExceptionClear()`.
+
+Also added null-check for `FindClass` return value (was previously assumed non-null).
+Added null-check for `charset` before `DeleteLocalRef(charset)`.
+
+**Regression prevention:** Inference path (`nativeGenerate`), context reset, sampler chain,
+and the `toJavaString()` call site are all unchanged. Only the error-handling paths inside
+`toJavaString()` are modified. Under normal operation (no OOM), code path is identical to v1.5.
+
+### 4. Chat Conversation History — FIXED ✅
+**Previous:** `ConversationHistoryDatabase` was only populated for public messages (SMS, email).
+Chat (admin/CHAT channel) messages were stored only in `ChatDatabase` for UI display, but NOT
+in `ConversationHistoryDatabase`. As a result, the AI had no memory of prior chat exchanges —
+every chat message was answered without any conversation context.
+
+**Fix:** In `MessageEngine.handleAdminCommand()`, the "genuine conversation" `else` branch
+(where a general chat message triggers `AiEngine.generateSmsReply()`):
+1. Calls `loadHistory("owner", "CHAT")` to retrieve the last `CONTEXT_WINDOW_TURNS` (6) turns.
+2. Records the user's input with `recordHistory("owner", "CHAT", "user", input)` before generation.
+3. Passes the loaded history to `generateSmsReply(..., conversationHistory = chatHistory)`.
+4. Records Aigentik's reply with `recordHistory("owner", "CHAT", "assistant", replyForHistory)`.
+   Signature stripped before storing (using `substringBefore("\n\n—")`) for cleaner context.
+
+**Guard conditions:**
+- Only applies when `message.channel == Message.Channel.CHAT`. Remote admin commands
+  (SMS/email with auth) do not get recorded in chat history.
+- `historyDao` null-safe: if `MessageEngine.configure()` hasn't been called yet (service not
+  running), `loadHistory` returns `emptyList()` and `recordHistory` is a no-op — no crash.
+- Session gap (2 hours) and trim (20 turns max) rules from `ConversationHistoryDatabase` apply
+  identically to chat, consistent with SMS/email channel behaviour.
+
+**No schema migration required:** `ConversationTurn.channel` already supports "CHAT" as a
+value (documented in the entity's comment since v1.4.6). The existing Room schema is unchanged.
+
+**Regression prevention:** This change only adds new logic to the `else` branch that previously
+had no history. All other branches (`gmail_*`, `find_contact`, etc.) are unmodified.
+`generateSmsReply()` already accepts `conversationHistory: List<String> = emptyList()` so
+the added argument is backwards-compatible. No new DB migration needed.
+
+---
+
+## Deferred Issues — v1.6 Deep Audit
+
+No new issues were discovered during v1.6 implementation that require deferral.
+The four issues listed under "Remaining Open Issues (Not Fixed in v1.5.5)" above are all
+resolved in v1.6.0.
+
+Pre-existing known limitations (not architectural issues, not regressions):
+1. **Remote admin + conversation history** — remote admin commands (SMS/email with auth)
+   that reach the "genuine conversation" AI branch are not recorded in chat history. These
+   are rare (admin sends an unusual command the AI doesn't recognize) and the omission is
+   intentional: remote admin sessions are command-control, not persistent conversations.
+2. **historyDao race on first chat** — if ChatActivity sends a message before AigentikService
+   configures MessageEngine, `historyDao` is null and the exchange is not recorded. This is
+   the same pre-existing condition that affected SMS/email history and is acceptable.
+3. **ContactEngine init race (theoretical)** — if `init()` is called concurrently from both
+   ChatActivity and AigentikService (rare timing), both will call `loadFromRoom()` which
+   atomically swaps the reference twice. The second swap wins. In practice both loads produce
+   identical data from Room. CopyOnWriteArrayList handles any concurrent `add()` calls safely.

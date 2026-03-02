@@ -1,4 +1,14 @@
-// llama_jni.cpp v1.5
+// llama_jni.cpp v1.6
+// v1.6: toJavaString() JNI exception hygiene hardening.
+//   If NewByteArray() fails (OOM), a Java OutOfMemoryError is pending. Calling
+//   NewStringUTF("") with a pending exception is undefined behaviour per JNI spec
+//   (though benign on all shipping Android JVMs). Fixed: ExceptionCheck()+ExceptionClear()
+//   before any fallback NewStringUTF() call when the prior allocation failed.
+//   Also added null-check for FindClass("java/lang/String") — theoretically could fail
+//   under extreme memory pressure — with the same ExceptionClear()+fallback pattern.
+//   NewObject() failure (OOM during String construction) is already null-checked; added
+//   ExceptionClear() so the pending exception is cleared before the fallback return.
+//   Inference flow, sampler chain, context reset, and toJavaString usage are unchanged.
 // v1.5: Reverted KV cache prefix reuse (v1.4) — llama_kv_cache_seq_rm /
 //   llama_kv_self_seq_rm is not present in the cached llama.cpp version.
 //   Reverted to resetContext() at the start of every generation (same as v1.3).
@@ -51,19 +61,47 @@ static std::mutex     g_mutex;
 // such bytes, NewStringUTF() calls abort() — killing the process immediately.
 // This helper creates a Java byte[] from raw bytes and uses the String(byte[], charset)
 // constructor to decode standard UTF-8 safely in Java, supporting all Unicode.
+//
+// JNI exception hygiene (v1.6 hardening):
+//   Per JNI spec, calling most JNI functions with a pending exception is undefined
+//   behaviour (only a small set of functions — DeleteLocalRef, ExceptionCheck,
+//   ExceptionClear, ExceptionOccurred — are safe to call with a pending exception).
+//   NewStringUTF("") as a fallback after a failed allocation is NOT in that safe set.
+//   Fix: ExceptionCheck()+ExceptionClear() before every fallback NewStringUTF("") call.
 static jstring toJavaString(JNIEnv* env, const std::string& s) {
     if (s.empty()) return env->NewStringUTF("");
+
+    // Step 1: Allocate byte array. NewByteArray can fail (OOM) and set a pending exception.
     jbyteArray arr = env->NewByteArray((jsize)s.size());
-    if (!arr) return env->NewStringUTF("");
+    if (!arr) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        return env->NewStringUTF("");
+    }
     env->SetByteArrayRegion(arr, 0, (jsize)s.size(),
                             reinterpret_cast<const jbyte*>(s.data()));
-    jclass  strClass = env->FindClass("java/lang/String");
-    jmethodID ctor   = env->GetMethodID(strClass, "<init>", "([BLjava/lang/String;)V");
-    jstring charset  = env->NewStringUTF("UTF-8");
-    auto    result   = (jstring)env->NewObject(strClass, ctor, arr, charset);
+
+    // Step 2: Resolve java.lang.String. FindClass can theoretically fail under OOM.
+    jclass strClass = env->FindClass("java/lang/String");
+    if (!strClass) {
+        env->DeleteLocalRef(arr);
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        return env->NewStringUTF("");
+    }
+
+    jmethodID ctor  = env->GetMethodID(strClass, "<init>", "([BLjava/lang/String;)V");
+    jstring charset = env->NewStringUTF("UTF-8");
+
+    // Step 3: Construct the String. NewObject can fail (OOM) and set a pending exception.
+    jstring result = nullptr;
+    if (ctor && charset) {
+        result = (jstring)env->NewObject(strClass, ctor, arr, charset);
+        if (!result && env->ExceptionCheck()) env->ExceptionClear();
+    }
+
     env->DeleteLocalRef(arr);
-    env->DeleteLocalRef(charset);
+    if (charset) env->DeleteLocalRef(charset);
     env->DeleteLocalRef(strClass);
+
     return result ? result : env->NewStringUTF("");
 }
 
