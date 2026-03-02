@@ -10,10 +10,13 @@ import kotlinx.coroutines.withContext
 //   system prompt ("have a natural, helpful conversation") and no SMS signature or
 //   SMS framing. maxTokens=512 for fuller responses. Used by MessageEngine fast-path
 //   (genuine conversation → generateChatReply, skip interpretCommand).
-//   interpretCommand() now strips <think>...</think> blocks before JSON parsing —
-//   Qwen3 thinking-mode models generate these before the JSON output; with maxTokens=120
-//   they can consume the entire budget leaving no JSON. Stripping lets parseCommandJson
-//   see the actual JSON when it fits within the budget.
+//   interpretCommand() Qwen3 thinking-mode optimisations (specific to Qwen3-Instruct):
+//   (a) Prompt is now appended with "<think>\n\n</think>\n" — an empty prefilled think
+//       block. Qwen3 sees the <think> tag already closed and skips chain-of-thought
+//       entirely, going straight to JSON output. Saves ~50-100 thinking tokens (~3-7s
+//       on Qwen3-4B) per command call.
+//   (b) <think>...</think> stripping retained as safety net for other model families
+//       that may emit thinking content despite the prefill.
 // v1.5: Robust JSON command parsing — replaced fragile regex extractJsonValue() with
 //   org.json.JSONObject parsing in parseCommandJson(). The old regex
 //   "\"$key\"\\s*:\\s*\"([^\"]+)\"" failed on escaped quotes inside values and on
@@ -297,7 +300,13 @@ object AiEngine {
                 "\"always reply formally to John\" -> {\"action\":\"set_contact_instructions\",\"target\":\"John\",\"content\":\"always reply formally\",\"query\":null} " +
                 "\"when texting Mom be casual\" -> {\"action\":\"set_contact_instructions\",\"target\":\"Mom\",\"content\":\"be casual and friendly\",\"query\":null}"
 
-            val prompt = llama.buildChatPrompt(systemMsg, "Command: \"$commandText\"")
+            // Append empty <think> block to the assistant prefill — Qwen3-specific trick
+            // to disable thinking mode for this call. Qwen3 sees <think> already closed
+            // in the prompt and skips chain-of-thought, going straight to JSON output.
+            // parse_special=true in llama_tokenize() ensures <think>/<|im_end|> etc. are
+            // tokenised as their proper special token IDs, not as plain text.
+            val prompt = llama.buildChatPrompt(systemMsg, "Command: \"$commandText\"") +
+                "<think>\n\n</think>\n"
             try {
                 // temperature=0.0 → greedy for deterministic JSON output
                 // Command parsing needs reliability over creativity
