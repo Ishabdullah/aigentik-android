@@ -156,7 +156,7 @@ object GmailApiClient {
                 .post(body.toRequestBody("application/json".toMediaType()))
                 .build()
             try {
-                val code = http.newCall(req).execute().code
+                val code = http.newCall(req).execute().use { it.code }
                 if (code in 200..299) lastError = null
                 code
             } catch (e: Exception) {

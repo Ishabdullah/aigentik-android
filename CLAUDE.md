@@ -5,7 +5,7 @@ You are continuing development of Aigentik — a privacy-first Android AI assist
 ## PROJECT OVERVIEW
 - App: Aigentik Android (com.aigentik.app)
 - Repo: ~/aigentik-android (local Termux) + GitHub (builds via Actions)
-- **Current version: v1.6.2 (versionCode 70)**
+- **Current version: v1.6.3 (versionCode 71)**
 - Developer environment: Samsung S24 Ultra, Termux only — NO Android Studio, NO local Gradle builds
 - All builds happen via GitHub Actions → APK downloaded and sideloaded
 
@@ -198,67 +198,39 @@ found the FIRST (oldest) email from a sender — multi-turn reply used wrong `th
    Added `CoroutineExceptionHandler` to EmailRouter scope.
 - Build: versionCode 70, versionName 1.6.2
 
-### v1.6.0 — Stability hardening: thread safety, race fix, JNI hygiene, chat history (2026-03-02)
-Four architectural correctness fixes — no features added, no regressions:
+### v1.6.3 — Stability: thread safety, cold-start Gmail fix, user bubble text, response leak (2026-03-09)
+Seven fixes from the forensic code audit (code-audit.md, 2026-03-02):
 
-1. **ContactEngine.kt v0.6 — Thread-safe in-memory cache**: Replaced `mutableListOf<Contact>()`
-   (ArrayList, not thread-safe) with `@Volatile CopyOnWriteArrayList<Contact>`. `loadFromRoom()`
-   now does atomic reference replacement (`contacts = CopyOnWriteArrayList(newList)`) instead
-   of `clear()+addAll()` — eliminates the empty-list window visible to concurrent readers.
-   Reads (find/filter/size) are lock-free; writes (add) are copy-on-write thread-safe.
-2. **EmailMonitor.kt v4.1 — AtomicBoolean for isProcessing**: Replaced `@Volatile Boolean`
-   (check-then-set race) with `AtomicBoolean` + `compareAndSet(false, true)` in
-   `onGmailNotification()`. Only one notification can win the CAS; all others return early.
-   `finally { isProcessing.set(false) }` moved to the `scope.launch {}` wrapper so it fires
-   unconditionally even if processing throws. Removed redundant `isProcessing = true` and
-   `finally` blocks from `processFromHistory()` and `processUnread()`.
-3. **llama_jni.cpp v1.6 — toJavaString() JNI exception hygiene**: Added
-   `ExceptionCheck()+ExceptionClear()` before every fallback `NewStringUTF("")` call that
-   follows a failed allocation (NewByteArray, FindClass, NewObject). Per JNI spec, calling
-   most JNI functions with a pending exception is undefined behaviour. Added null-check for
-   `FindClass` return value and null-check for `charset` before `DeleteLocalRef`.
-   Inference path and toJavaString call site are unchanged.
-4. **MessageEngine.kt v1.9 — Chat conversation history**: The "genuine conversation" else
-   branch in `handleAdminCommand()` now persists exchanges to `ConversationHistoryDatabase`
-   (contactKey="owner", channel="CHAT"). Loads last `CONTEXT_WINDOW_TURNS` (6) turns before
-   generating reply; records user input and stripped AI reply after. Applies only to
-   `channel == CHAT` (not remote admin commands). `historyDao` null-safe — early messages
-   before service starts are handled gracefully (load returns [], record is no-op).
-- Build: versionCode 68, versionName 1.6.0
-
-### v1.5.5 — Medium/low priority improvements: JSON parsing, Gmail batch, KV cache, theme (2026-03-01)
-Four improvements from the v1.5.4 code audit backlog:
-
-1. **AiEngine.kt v1.5 — Robust JSON command parsing**: Replaced `extractJsonValue()` regex with
-   `org.json.JSONObject` parsing in `parseCommandJson()`. Old regex failed on escaped quotes,
-   numeric values, and JSON null. `optString(key, "")` handles all edge cases. Falls back to
-   `parseSimpleCommand()` on `JSONException` (malformed/truncated LLM output).
-2. **GmailApiClient.kt v1.4 — Batch trash instead of per-email calls**: `deleteAllMatching()`
-   now collects all matching IDs first (unchanged pagination), then sends one `batchModify` POST
-   per 1000 IDs (`addLabelIds:["TRASH"], removeLabelIds:["INBOX"]`). O(N) HTTP calls → O(⌈N/1000⌉).
-3. **llama_jni.cpp v1.4 — KV cache prefix reuse**: Tokenize first, compare against
-   `g_last_prompt_tokens`, and if ≥50 common tokens found: trim KV cache with
-   `llama_kv_cache_seq_rm(g_ctx, 0, common_prefix, -1)` and only decode new tokens.
-   `interpretCommand()`'s ~700-token system prompt skipped on every subsequent chat message.
-   `g_last_prompt_tokens` cleared on model load/unload. Fallback to `resetContext()` for fresh
-   starts and mismatched prompts. `toJavaString()` crash fix untouched.
-4. **ThemeHelper ordering — all 8 activities**: Moved `AigentikSettings.init(this)` +
-   `ThemeHelper.applySavedTheme()` before `super.onCreate()` in all activities. AppCompatDelegate
-   must be configured before it initializes in `super.onCreate()` or theme only applies on next
-   recreation. Also added `AigentikSettings.init(this)` + import to RuleManagerActivity.
-- Build: versionCode 67, versionName 1.5.5
-
-### v1.5.4 — Deep audit verification + MaterialAlertDialogBuilder fix (2026-03-01)
-Second-pass deep verification audit confirmed all v1.5.3 crash fixes are fully correct.
-Traced complete execution paths for all four crash scenarios.
-
-1. **SettingsHubActivity** — `AlertDialog.Builder(this)` → `MaterialAlertDialogBuilder(this)`.
-   Project convention requires Material dialog builder with Material3 theme; AppCompat
-   AlertDialog can cause theme-resolution issues. Same fix as OnboardingActivity in v1.5.2.
-2. **code-audit.md** — Added "New Issues Discovered During v1.5.3 Deep Audit" section and
-   "v1.5.3 Deep Audit Verification Summary" confirming all crashes resolved. Documented
-   pre-existing issues (ContactEngine thread safety, EmailMonitor race, toJavaString OOM edge).
-- Build: versionCode 66, versionName 1.5.4
+1. **item_message_user.xml — CRIT: User bubble text now readable in both themes**: Changed
+   `android:textColor` from `@color/aigentik_on_primary` (white on light-gray = 1.04:1 contrast;
+   black on near-black = 1.19:1 contrast — both invisible) to `?android:attr/textColorPrimary`
+   (resolves to near-black in light mode, near-white in dark mode — correct for neutral bubble).
+2. **MessageEngine.kt — CRIT: Gmail works immediately on cold start**: Added `initContext(context)`
+   function called from `ChatActivity.onCreate()` to set `appContext` before `AigentikService`
+   finishes init. Previously, all Gmail commands returned "Gmail not initialized — restart app"
+   for the first 30-60 seconds (entire model load window). `configure()` still overwrites on
+   service startup — `initContext()` only sets if null (no-op on second call).
+3. **DestructiveActionGuard.kt — HIGH: pendingActions thread-safe**: Changed `mutableMapOf()`
+   to `ConcurrentHashMap` — multiple IO coroutines (one per channel) can confirm/store
+   destructive actions concurrently. Prevents `ConcurrentModificationException`.
+4. **AdminAuthManager.kt — HIGH: activeSessions thread-safe**: Same fix — `mutableMapOf()`
+   to `ConcurrentHashMap`. `authenticate()` and `hasActiveSession()` called from concurrent
+   IO coroutines for simultaneous SMS/email admin sessions.
+5. **NotificationReplyRouter.kt — HIGH: reply maps thread-safe**: Both `messageIdToSbnKey`
+   and `sbnKeyToEntry` changed from `mutableMapOf()` to `ConcurrentHashMap`. `register()` and
+   `onNotificationRemoved()` run on the NotificationListenerService thread; `sendReply()` runs
+   on MessageEngine IO thread. Previously racy under load.
+6. **GmailApiClient.kt — HIGH: postRaw() response body closed**: Changed
+   `http.newCall(req).execute().code` to `.execute().use { it.code }`. OkHttp `Response`
+   must be closed to release socket connections. Called in a loop by `emptyTrash()` — was
+   leaking connections and would cause `IOException` after batch operations.
+7. **MessageEngine.kt — LOW: chatNotifier @Volatile**: Marked `@Volatile` to ensure write
+   visibility across CPU cores. Written from `ChatActivity` (Main thread) and `AigentikService`
+   (IO thread). Without `@Volatile`, stale reads possible on multi-core ARM.
+8. **AigentikService.kt — HIGH: initAllEngines catches Throwable**: Changed
+   `catch (e: Exception)` to `catch (e: Throwable)` — consistent with v1.6.2 hardening
+   in EmailMonitor/AiEngine. `OutOfMemoryError` during large model load no longer escapes silently.
+- Build: versionCode 71, versionName 1.6.3
 
 
 ## NAVIGATION ARCHITECTURE (v1.5.1)

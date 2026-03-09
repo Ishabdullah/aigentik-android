@@ -75,6 +75,10 @@ class ChatActivity : AppCompatActivity() {
         // AigentikService isn't running yet (service also sets this on startup)
         com.aigentik.app.core.MessageEngine.chatNotifier = { com.aigentik.app.core.ChatBridge.post(it) }
 
+        // Prime appContext immediately so Gmail commands work before service init completes
+        // (service startup with model load can take 30-60s — without this all Gmail ops fail)
+        com.aigentik.app.core.MessageEngine.initContext(applicationContext)
+
         // ContactEngine needed for status/find local commands.
         // Moved off main thread — init() calls loadFromRoom() (Room DAO) which throws
         // IllegalStateException on Android if called from the main thread.

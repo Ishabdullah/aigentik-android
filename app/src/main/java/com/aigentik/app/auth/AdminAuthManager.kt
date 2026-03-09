@@ -28,7 +28,8 @@ object AdminAuthManager {
     private const val SESSION_TIMEOUT_MS = 30 * 60 * 1000L // 30 minutes
 
     // Active remote sessions — key = channel identifier (phone/email)
-    private val activeSessions = mutableMapOf<String, Long>()
+    // ConcurrentHashMap: authenticate() and hasActiveSession() called from multiple IO coroutines
+    private val activeSessions = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     // Destructive action keywords — always require password confirmation
     private val DESTRUCTIVE_KEYWORDS = listOf(

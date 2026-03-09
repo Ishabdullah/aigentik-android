@@ -21,8 +21,9 @@ object NotificationReplyRouter {
 
     // Dual map — semantic messageId → OS sbn.key, OS sbn.key → ReplyEntry
     // Semantic key used by MessageEngine, OS key used for staleness detection
-    private val messageIdToSbnKey = mutableMapOf<String, String>()
-    private val sbnKeyToEntry     = mutableMapOf<String, ReplyEntry>()
+    // ConcurrentHashMap: register()/onNotificationRemoved() on NLS thread, sendReply() on IO
+    private val messageIdToSbnKey = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val sbnKeyToEntry     = java.util.concurrent.ConcurrentHashMap<String, ReplyEntry>()
 
     data class ReplyEntry(
         val notification: Notification,

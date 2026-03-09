@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
 Generate Android launcher icons from aigentik_app_icon.jpg
-Outputs ic_launcher.png and ic_launcher_round.png at all mipmap densities.
+Outputs ic_launcher.png, ic_launcher_round.png, and ic_launcher_foreground.png
+at all mipmap densities.
 """
 from PIL import Image, ImageDraw
 import os
-import shutil
 
-SRC = os.path.expanduser("~/storage/downloads/aigentik_app_icon.jpg")
-RES = os.path.expanduser("~/aigentik-android/app/src/main/res")
+SRC = "docs/images/aigentik_app_icon.jpg"
+RES = "app/src/main/res"
 
 DENSITIES = {
     "mipmap-mdpi":    48,
@@ -16,6 +16,15 @@ DENSITIES = {
     "mipmap-xhdpi":   96,
     "mipmap-xxhdpi":  144,
     "mipmap-xxxhdpi": 192,
+}
+
+# Adaptive icon foreground is typically 108dp
+ADAPTIVE_DENSITIES = {
+    "mipmap-mdpi":    108,
+    "mipmap-hdpi":    162,
+    "mipmap-xhdpi":   216,
+    "mipmap-xxhdpi":  324,
+    "mipmap-xxxhdpi": 432,
 }
 
 def make_square(img):
@@ -37,6 +46,10 @@ def make_round(img, size):
     return result
 
 def main():
+    if not os.path.exists(SRC):
+        print(f"Error: {SRC} not found")
+        return
+
     print(f"Opening source: {SRC}")
     src = Image.open(SRC).convert("RGBA")
     src = make_square(src)
@@ -46,26 +59,39 @@ def main():
         out_dir = os.path.join(RES, density)
         os.makedirs(out_dir, exist_ok=True)
 
-        # Regular icon
+        # Legacy Square icon (Full size)
         square = src.resize((size, size), Image.LANCZOS)
         out_path = os.path.join(out_dir, "ic_launcher.png")
         square.save(out_path, "PNG")
         print(f"  Wrote {out_path} ({size}x{size})")
 
-        # Round icon
+        # Legacy Round icon
         round_img = make_round(src.copy(), size)
         round_path = os.path.join(out_dir, "ic_launcher_round.png")
         round_img.save(round_path, "PNG")
         print(f"  Wrote {round_path} ({size}x{size} round)")
 
-    # Remove old drawable XML (replaced by mipmap references in manifest)
-    xml_path = os.path.join(RES, "drawable", "ic_launcher.xml")
-    if os.path.exists(xml_path):
-        os.remove(xml_path)
-        print(f"\nRemoved old {xml_path}")
+    # Generate Adaptive Foreground
+    # For adaptive icons, we often want the foreground centered and slightly scaled
+    # so it's within the safe zone (72/108 = 66.6%).
+    for density, size in ADAPTIVE_DENSITIES.items():
+        out_dir = os.path.join(RES, density)
+        
+        # Adaptive icon foreground layer (108x108 dp)
+        # Content should ideally be centered in 108x108
+        foreground = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        # Scale the icon to ~70% of 108dp to fit well in the safe zone
+        icon_size = int(size * 0.7)
+        icon_resized = src.resize((icon_size, icon_size), Image.LANCZOS)
+        
+        pos = (size - icon_size) // 2
+        foreground.paste(icon_resized, (pos, pos))
+        
+        out_path = os.path.join(out_dir, "ic_launcher_foreground.png")
+        foreground.save(out_path, "PNG")
+        print(f"  Wrote adaptive foreground: {out_path} ({size}x{size})")
 
     print("\nDone! All icons generated.")
-    print("Remember: manifest now uses @mipmap/ic_launcher")
 
 if __name__ == "__main__":
     main()

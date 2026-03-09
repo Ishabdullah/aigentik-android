@@ -92,7 +92,8 @@ object MessageEngine {
     private var appContext: Context? = null
 
     // chatNotifier posts messages into Room DB so they appear in chat history
-    var chatNotifier: ((String) -> Unit)? = null
+    // @Volatile: written from ChatActivity (Main) and AigentikService (IO) — visibility guarantee
+    @Volatile var chatNotifier: ((String) -> Unit)? = null
 
     // Conversation history DAO — initialized from configure() context
     private var historyDao: ConversationHistoryDao? = null
@@ -114,6 +115,15 @@ object MessageEngine {
         historyDao         = ConversationHistoryDatabase.getInstance(context).historyDao()
         AiEngine.configure(agentName, ownerName)
         Log.i(TAG, "$agentName MessageEngine configured")
+    }
+
+    // Provides appContext immediately from ChatActivity.onCreate() so Gmail commands
+    // work before AigentikService.initAllEngines() completes (service startup can take 30-60s)
+    fun initContext(context: Context) {
+        if (appContext == null) {
+            appContext = context.applicationContext
+            Log.i(TAG, "appContext primed from ChatActivity")
+        }
     }
 
     // Stable channel key for destructive action guard:

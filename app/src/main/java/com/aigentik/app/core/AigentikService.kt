@@ -150,7 +150,7 @@ class AigentikService : Service() {
                 )
                 Log.i(TAG, "Aigentik v1.0 fully started")
 
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.e(TAG, "Init failed: ${e.message}")
                 updateNotification("⚠️ Init error: ${e.message?.take(50)}")
             }

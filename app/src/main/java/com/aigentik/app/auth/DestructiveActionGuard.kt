@@ -34,8 +34,9 @@ object DestructiveActionGuard {
         val onRejected: () -> String = { "❌ Action cancelled." }
     )
 
-    // One pending action per channel
-    private val pendingActions = mutableMapOf<String, PendingAction>()
+    // One pending action per channel — ConcurrentHashMap for thread safety
+    // (multiple coroutines from different channels can confirm/store concurrently)
+    private val pendingActions = java.util.concurrent.ConcurrentHashMap<String, PendingAction>()
 
     // Common English words unlikely to be admin codes.
     // These are excluded from word-by-word password matching to reduce
