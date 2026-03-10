@@ -23,7 +23,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-// AigentikService v1.5
+// AigentikService v1.6
+// v1.6: MessageEngine.configure() moved before EmailMonitor.init() (code-audit-2026-03-10).
+//   Previously configure() was called AFTER EmailMonitor.init(). If a Gmail notification
+//   arrived between those two calls, EmailMonitor would trigger processEmail() →
+//   MessageEngine.onMessageReceived() with wakeLock=null (not yet configured).
+//   Without the wake lock, Samsung throttles background CPU — LLM inference goes from
+//   30s to 5+ minutes — extending the memory-pressure window and increasing crash risk.
+//   Fix: configure() with wakeLock is now called first; EmailMonitor.init follows.
+//   No functional regression — EmailMonitor.init() only stores appContext.
 // v1.5: Reverted Pub/Sub (cloud violation) — Gmail trigger is now notification-listener only
 //   GmailHistoryClient.primeHistoryId() primes a baseline historyId from Gmail profile on start
 //   EmailMonitor.onGmailNotification() is the sole trigger (same on-device pattern as SMS/RCS)
@@ -98,10 +106,31 @@ class AigentikService : Service() {
                     Log.w(TAG, "No model — fallback mode")
                 }
 
-                // Gmail — OAuth2, push notifications via Pub/Sub + notification fallback
+                // MessageEngine configured FIRST — sets wakeLock before EmailMonitor starts.
+                // Without this order, a Gmail notification arriving between EmailMonitor.init()
+                // and configure() would process emails with wakeLock=null (no CPU wake lock),
+                // causing Samsung to throttle inference to 5+ min and extend memory pressure.
                 // NOTE: applicationContext captured outside coroutine scope
                 // 'this' inside launch{} refers to CoroutineScope, not Service
                 val appCtx = applicationContext
+                MessageEngine.configure(
+                    context      = appCtx,
+                    adminNumber  = adminNumber,
+                    ownerName    = ownerName,
+                    agentName    = agentName,
+                    wakeLock     = wakeLock,
+                    ownerNotifier = { message ->
+                        EmailRouter.notifyOwner(message)
+                        updateNotification(message.take(60))
+                    }
+                )
+
+                // Wire chat notifier — posts to Room DB so notifications appear in chat
+                MessageEngine.chatNotifier = { message ->
+                    ChatBridge.post(message)
+                }
+
+                // Gmail — OAuth2 notification-driven email processing
                 EmailMonitor.init(appCtx)
                 EmailRouter.init(appCtx)
 
@@ -122,24 +151,6 @@ class AigentikService : Service() {
                         GmailHistoryClient.PrimeResult.NETWORK_ERROR ->
                             Log.e(TAG, "Gmail historyId prime failed — network error")
                     }
-                }
-
-                // MessageEngine — context for Gmail API, wakeLock for background inference
-                MessageEngine.configure(
-                    context      = appCtx,
-                    adminNumber  = adminNumber,
-                    ownerName    = ownerName,
-                    agentName    = agentName,
-                    wakeLock     = wakeLock,
-                    ownerNotifier = { message ->
-                        EmailRouter.notifyOwner(message)
-                        updateNotification(message.take(60))
-                    }
-                )
-
-                // Wire chat notifier — posts to Room DB so notifications appear in chat
-                MessageEngine.chatNotifier = { message ->
-                    ChatBridge.post(message)
                 }
 
                 ConnectionWatchdog.start(applicationContext)

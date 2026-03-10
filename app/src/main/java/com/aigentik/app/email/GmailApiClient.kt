@@ -19,7 +19,12 @@ import javax.mail.Session
 import javax.mail.internet.InternetAddress
 import javax.mail.internet.MimeMessage
 
-// GmailApiClient v1.5 — Gmail REST API via OkHttp
+// GmailApiClient v1.6 — Gmail REST API via OkHttp
+// v1.6: get() and post() response bodies wrapped in .use { } (code-audit-2026-03-10 Bug 7).
+//   OkHttp Response implements Closeable — must be closed to release the underlying
+//   socket connection back to the pool. Previously, if an exception was thrown between
+//   execute() and body.string(), the response was never closed, leaking the connection.
+//   postRaw() was already fixed in v1.6.3; this applies the same fix to get() and post().
 // v1.5: Fixed extractBody() — recursive MIME traversal + HTML truncation to prevent
 //   OOM/StackOverflowError on multi-turn email thread replies. Old single-level code
 //   missed text/plain nested inside multipart/mixed → multipart/alternative, fell back
@@ -77,22 +82,24 @@ object GmailApiClient {
                 .header("Authorization", "Bearer $token")
                 .build()
             try {
-                val resp = http.newCall(req).execute()
-                if (!resp.isSuccessful) {
-                    val respBody = resp.body?.string()?.take(200) ?: ""
-                    val code = resp.code
-                    Log.e(TAG, "GET $url → $code: $respBody")
-                    lastError = when (code) {
-                        401 -> "Gmail auth expired (401) — re-sign-in required"
-                        403 -> "Gmail access denied (403) — check permissions"
-                        404 -> "Gmail resource not found (404)"
-                        429 -> "Gmail rate limit exceeded (429) — try again later"
-                        else -> "Gmail API error ($code)"
+                http.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) {
+                        val respBody = resp.body?.string()?.take(200) ?: ""
+                        val code = resp.code
+                        Log.e(TAG, "GET $url → $code: $respBody")
+                        lastError = when (code) {
+                            401 -> "Gmail auth expired (401) — re-sign-in required"
+                            403 -> "Gmail access denied (403) — check permissions"
+                            404 -> "Gmail resource not found (404)"
+                            429 -> "Gmail rate limit exceeded (429) — try again later"
+                            else -> "Gmail API error ($code)"
+                        }
+                        return@withContext null
                     }
-                    return@withContext null
+                    lastError = null
+                    val bodyStr = resp.body?.string() ?: return@withContext null
+                    JsonParser.parseString(bodyStr).asJsonObject
                 }
-                lastError = null
-                JsonParser.parseString(resp.body?.string()).asJsonObject
             } catch (e: Exception) {
                 Log.e(TAG, "GET failed: ${e.message}")
                 lastError = "Network error: ${e.message?.take(80)}"
@@ -115,25 +122,26 @@ object GmailApiClient {
                 .post(body.toRequestBody("application/json".toMediaType()))
                 .build()
             try {
-                val resp = http.newCall(req).execute()
-                if (!resp.isSuccessful) {
-                    val respBody = resp.body?.string()?.take(200) ?: ""
-                    val code = resp.code
-                    Log.e(TAG, "POST $url → $code: $respBody")
-                    lastError = when (code) {
-                        401 -> "Gmail auth expired (401) — re-sign-in required"
-                        403 -> "Gmail access denied (403) — check permissions"
-                        429 -> "Gmail rate limit exceeded (429) — try again later"
-                        else -> "Gmail API error ($code)"
+                http.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) {
+                        val respBody = resp.body?.string()?.take(200) ?: ""
+                        val code = resp.code
+                        Log.e(TAG, "POST $url → $code: $respBody")
+                        lastError = when (code) {
+                            401 -> "Gmail auth expired (401) — re-sign-in required"
+                            403 -> "Gmail access denied (403) — check permissions"
+                            429 -> "Gmail rate limit exceeded (429) — try again later"
+                            else -> "Gmail API error ($code)"
+                        }
+                        return@withContext null
                     }
-                    return@withContext null
+                    lastError = null
+                    // 204 No Content — success with empty body (e.g. batchModify)
+                    if (resp.code == 204) return@withContext JsonObject()
+                    val bodyStr = resp.body?.string() ?: return@withContext JsonObject()
+                    if (bodyStr.isBlank()) return@withContext JsonObject()
+                    JsonParser.parseString(bodyStr).asJsonObject
                 }
-                lastError = null
-                // 204 No Content — success with empty body (e.g. batchModify)
-                if (resp.code == 204) return@withContext JsonObject()
-                val bodyStr = resp.body?.string() ?: return@withContext JsonObject()
-                if (bodyStr.isBlank()) return@withContext JsonObject()
-                JsonParser.parseString(bodyStr).asJsonObject
             } catch (e: Exception) {
                 Log.e(TAG, "POST failed: ${e.message}")
                 lastError = "Network error: ${e.message?.take(80)}"

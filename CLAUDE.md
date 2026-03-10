@@ -5,7 +5,7 @@ You are continuing development of Aigentik — a privacy-first Android AI assist
 ## PROJECT OVERVIEW
 - App: Aigentik Android (com.aigentik.app)
 - Repo: ~/aigentik-android (local Termux) + GitHub (builds via Actions)
-- **Current version: v1.6.3 (versionCode 71)**
+- **Current version: v1.7.0 (versionCode 72)**
 - Developer environment: Samsung S24 Ultra, Termux only — NO Android Studio, NO local Gradle builds
 - All builds happen via GitHub Actions → APK downloaded and sideloaded
 
@@ -128,7 +128,47 @@ These policies are non-negotiable. Claude MUST refuse any implementation that vi
 
 ## CHANGE LOG
 
-### v1.6.1 — Fix chat LLM crash: fast-path, generateChatReply, think stripping, timeout (current, 2026-03-02)
+### v1.7.0 — Stability: crash fixes from code audit (current, 2026-03-10)
+Nine fixes from code-audit-2026-03-10.md:
+
+1. **ChatActivity.kt v1.2 — CRIT: CoroutineExceptionHandler on scope**: Added handler to
+   `CoroutineScope(Dispatchers.Main + SupervisorJob())`. Previously any uncaught Error
+   (OOM etc.) escaped to Android's UncaughtExceptionHandler → process kill. Now logged.
+2. **ChatActivity.kt v1.2 — CRIT: catch(Throwable) in sendMessage()**: Widened from
+   `catch(e: Exception)` — OOM and Error subclasses were bypassing the catch entirely.
+3. **ChatActivity.kt v1.2 — HIGH: timeoutJob separated**: Safety timeout extracted into
+   its own `Job` (`timeoutJob`). Each `sendMessage()` cancels the prior timeout before
+   starting a new one — eliminates overlapping 120s timers from multiple messages.
+4. **ChatActivity.kt v1.2 — HIGH: pendingUserMessageId fixes false awaitingResponse reset**:
+   Room ID of the pending user message is tracked. `observeMessages()` only resets
+   `awaitingResponse` when it sees an assistant message AFTER the pending user message —
+   prevents email auto-reply notifications (ChatBridge.post) from triggering a premature
+   UI reset and allowing message 2 to be sent before message 1's reply arrives.
+5. **MessageEngine.kt v2.1 — CRIT: messageMutex serialises all message handlers**: Adds
+   `Mutex` wrapping `handleAdminCommand`/`handlePublicMessage` inside `scope.launch`.
+   Root cause of first-install crash: 10 concurrent email coroutines all called
+   `nativeGenerate → resetContext` (128MB free/alloc each), causing native memory
+   fragmentation → SIGABRT or LMK kill. Mutex ensures one handler runs at a time.
+   Also widened `handlePublicMessage` catch to `Throwable` + added ownerNotifier call.
+6. **AigentikService.kt v1.6 — HIGH: MessageEngine.configure() moved before EmailMonitor.init()**:
+   Without this order, Gmail notifications arriving during model load processed emails
+   with `wakeLock=null` — Samsung CPU throttle extended inference from 30s to 5+ min,
+   widening the memory-pressure crash window.
+7. **EmailMonitor.kt v4.3 — HIGH: processUnread capped at 3 emails (was 10)**: On first
+   install (no stored historyId) all unread emails hit the fallback path. Capping at 3
+   limits the number of queued coroutines; MessageEngine.messageMutex handles the rest.
+8. **NotificationAdapter.kt v1.5 — HIGH: ConcurrentHashMap for activeNotifications**: Was
+   plain `LinkedHashMap` — ConcurrentModificationException risk under notification bursts.
+   Same fix applied to the 4 other maps in v1.6.3; this one was missed.
+9. **GmailApiClient.kt v1.6 — MEDIUM: get() and post() wrapped in .use {}**: OkHttp
+   Response must be closed to release socket. Previously could leak connections on
+   exceptions. postRaw() was fixed in v1.6.3; this extends the fix to get() and post().
+10. **ChatDao.kt v0.9.4 — MEDIUM: getAllMessages() capped at 200 rows**: Full-table scan
+    on every Room insert caused O(N) Main-thread view re-render. 200-row subquery
+    returns the most recent 200 messages in chronological order.
+- Build: versionCode 72, versionName 1.7.0
+
+### v1.6.1 — Fix chat LLM crash: fast-path, generateChatReply, think stripping, timeout (2026-03-02)
 Four fixes for the double-LLM-call "crash" (45s freeze) when typing general messages in chat:
 
 1. **MessageEngine.kt v2.0 — Fast-path eliminates double LLM call**: Added `looksLikeCommand()`

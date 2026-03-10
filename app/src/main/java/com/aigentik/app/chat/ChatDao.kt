@@ -6,12 +6,19 @@ import androidx.room.Query
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
-// ChatDao v0.9.3 — database access for chat messages
+// ChatDao v0.9.4 — database access for chat messages
+// v0.9.4: getAllMessages() capped at 200 most-recent rows (code-audit-2026-03-10 Bug 5).
+//   Previously SELECT * with no LIMIT — every Room insert triggered a full-table scan and
+//   re-render of ALL messages on the Main thread (removeAllViews + re-inflate). With many
+//   email auto-reply notifications accumulated in chat, this becomes O(N) work per message,
+//   eventually causing ANR. The subquery pattern (newest 200, then re-sort ASC) returns
+//   the most recent 200 in chronological order for display.
 @Dao
 interface ChatDao {
 
-    // Flow emits new list whenever table changes — auto-updates UI
-    @Query("SELECT * FROM chat_messages ORDER BY timestamp ASC")
+    // Flow emits new list whenever table changes — auto-updates UI.
+    // Capped at 200 most-recent rows to prevent O(N) main-thread re-render with large history.
+    @Query("SELECT * FROM (SELECT * FROM chat_messages ORDER BY timestamp DESC LIMIT 200) ORDER BY timestamp ASC")
     fun getAllMessages(): Flow<List<ChatMessage>>
 
     @Query("SELECT * FROM chat_messages ORDER BY timestamp ASC LIMIT :limit")

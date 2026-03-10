@@ -12,7 +12,15 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
 
-// EmailMonitor v4.2 — on-device notification-triggered Gmail processing
+// EmailMonitor v4.3 — on-device notification-triggered Gmail processing
+// v4.3: processUnread() capped at 3 emails (was 10) (code-audit-2026-03-10).
+//   On first install there is no stored historyId, so every Gmail notification falls
+//   through to the listUnread() fallback. Fetching 10 emails dispatched all 10 to
+//   MessageEngine.onMessageReceived() simultaneously. MessageEngine's new messageMutex
+//   (v2.1) serialises them, but they were still all alive holding email data + waiting
+//   for the mutex. Capping at 3 limits the queue depth for the fallback path.
+//   The History API path (primary, after historyId is primed) always fetches only the
+//   delta since last check, so no cap needed there.
 //
 // v4.2: Hard crash prevention.
 //   1. CoroutineExceptionHandler added to scope — previously EmailMonitor's scope had no
@@ -156,7 +164,12 @@ object EmailMonitor {
 
     // No try/finally needed here — isProcessing is reset in onGmailNotification's launch wrapper.
     private suspend fun processUnread(context: Context) {
-        val emails = GmailApiClient.listUnread(context, maxResults = 10)
+        // Cap at 3 emails on the fallback path (no historyId stored).
+        // On first install all unread emails hit this path simultaneously — 10 would
+        // dispatch 10 concurrent MessageEngine coroutines. 3 limits queue depth while
+        // still processing the most recent emails. MessageEngine.messageMutex (v2.1)
+        // serialises execution but the cap reduces memory from waiting coroutines.
+        val emails = GmailApiClient.listUnread(context, maxResults = 3)
         if (emails.isEmpty()) {
             Log.d(TAG, "Fallback: no unread emails")
             return

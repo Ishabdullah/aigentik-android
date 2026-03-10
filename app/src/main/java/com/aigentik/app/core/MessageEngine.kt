@@ -15,8 +15,29 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
-// MessageEngine v2.0
+// MessageEngine v2.1
+// v2.1: Serial message processing via Mutex (code-audit-2026-03-10):
+//   Added messageMutex (kotlinx Mutex) wrapping the entire handleAdminCommand /
+//   handlePublicMessage execution inside onMessageReceived's scope.launch.
+//   Root cause of first-install crash: on cold start with no stored historyId,
+//   processUnread() fetched up to 10 unread emails and dispatched all 10 to
+//   MessageEngine simultaneously via scope.launch. Each waiting coroutine was alive
+//   and held email data; each generate() call destroyed and recreated the 128MB KV
+//   context. 10x sequential context churn caused native memory fragmentation and
+//   sustained ~5-10 minutes of high memory pressure → native crash or LMK kill.
+//   Fix: Mutex ensures only ONE message handler runs at a time. Email coroutines queue
+//   on the mutex and process one-by-one; KV context is only reset once per handler.
+//   No regression: LlamaJNI.ReentrantLock already serialised LLM calls — this just
+//   also serialises the surrounding context (Room, EmailRouter, etc.). Chat messages
+//   may wait slightly longer if an email is processing, but the 120s safety timeout
+//   in ChatActivity is the backstop.
+//   Also widened catch(Exception) → catch(Throwable) in handlePublicMessage so OOM
+//   from generateEmailReply/generateSmsReply is logged and owner notified rather than
+//   silently dropped (was caught by scope's CoroutineExceptionHandler previously, but
+//   ownerNotifier was never called). Consistent with v1.8 hardening in handleAdminCommand.
 // v2.0: Eliminate double LLM call for general chat messages.
 //   Root cause: handleAdminCommand() always called interpretCommand() (LLM call 1)
 //   even for pure conversation ("hello", "how are you") — which returned action=unknown
@@ -83,6 +104,12 @@ object MessageEngine {
         Log.e(TAG, "Unhandled coroutine exception: ${e.message}", e)
     }
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob() + exceptionHandler)
+
+    // Serialises ALL message handlers — only one runs at a time.
+    // Prevents the email-flood crash: 10 concurrent email coroutines each reset the
+    // 128MB native KV context, causing memory fragmentation. With this mutex they
+    // queue and execute one-by-one, so context is only reset once per handler.
+    private val messageMutex = Mutex()
 
     private var adminNumber  = ""
     private var ownerName    = "Ish"
@@ -211,8 +238,13 @@ object MessageEngine {
             val wl = wakeLock
             wl?.acquire(10 * 60 * 1000L)
             try {
-                if (isAdmin) handleAdminCommand(message)
-                else handlePublicMessage(message)
+                // messageMutex ensures only ONE handler executes at a time.
+                // Email floods (10 concurrent coroutines) queue here rather than
+                // all trying to run nativeGenerate → resetContext simultaneously.
+                messageMutex.withLock {
+                    if (isAdmin) handleAdminCommand(message)
+                    else handlePublicMessage(message)
+                }
             } finally {
                 if (wl?.isHeld == true) wl.release()
             }
@@ -939,8 +971,11 @@ object MessageEngine {
                 val ch = message.channel
                 notify("💬 New message from $sender [$ch]:\n\"$preview\"\n\nSay \"always reply to $sender\" to auto-reply")
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Public message failed: ${e.message}")
+        } catch (e: Throwable) {
+            // Widened from Exception to Throwable — consistent with handleAdminCommand (v1.8).
+            // OOM from generateEmailReply/generateSmsReply previously bypassed this catch.
+            Log.e(TAG, "Public message failed: ${e.javaClass.simpleName}: ${e.message}", e)
+            ownerNotifier?.invoke("⚠️ Failed to process message from ${message.sender}: ${e.javaClass.simpleName}")
         }
     }
 

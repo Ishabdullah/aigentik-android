@@ -4,6 +4,7 @@ import android.app.Notification
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
+import java.util.concurrent.ConcurrentHashMap
 import com.aigentik.app.core.ChannelManager
 import com.aigentik.app.core.ContactEngine
 import com.aigentik.app.core.Message
@@ -12,7 +13,14 @@ import com.aigentik.app.core.MessageEngine
 import com.aigentik.app.core.PhoneNormalizer
 import com.aigentik.app.email.EmailMonitor
 
-// NotificationAdapter v1.4
+// NotificationAdapter v1.5
+// v1.5: activeNotifications changed from mutableMapOf() (LinkedHashMap, NOT thread-safe)
+//   to ConcurrentHashMap (code-audit-2026-03-10 Bug 6).
+//   onNotificationPosted and onNotificationRemoved can be called from different threads
+//   (NotificationListenerService does not guarantee a single thread). Under notification
+//   bursts this caused ConcurrentModificationException. Same class of fix applied to
+//   DestructiveActionGuard, AdminAuthManager, and NotificationReplyRouter in v1.6.3 —
+//   this map was missed in that pass.
 // v1.4: Self-reply prevention — wasSentRecently() check skips notifications
 //   triggered by Samsung updating the conversation after we send an inline reply
 //   (Samsung shows our reply as the "latest message" in the notification)
@@ -35,7 +43,9 @@ class NotificationAdapter : NotificationListenerService() {
         private const val KEY_BIG_TEXT = "android.bigText"
     }
 
-    private val activeNotifications = mutableMapOf<String, StatusBarNotification>()
+    // ConcurrentHashMap — onNotificationPosted and onNotificationRemoved may run on
+    // different threads; plain LinkedHashMap caused ConcurrentModificationException.
+    private val activeNotifications = ConcurrentHashMap<String, StatusBarNotification>()
 
     // Set context IMMEDIATELY when service binds — before any notification arrives
     override fun onListenerConnected() {

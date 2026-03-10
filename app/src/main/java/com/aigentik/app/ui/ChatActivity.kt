@@ -24,8 +24,10 @@ import com.aigentik.app.core.AigentikSettings
 import com.aigentik.app.core.ContactEngine
 import com.aigentik.app.core.Message
 import com.aigentik.app.core.MessageEngine
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -36,6 +38,23 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+// ChatActivity v1.2
+// v1.2: Stability hardening (code-audit-2026-03-10 findings):
+//   1. CoroutineExceptionHandler added to scope — any uncaught Error (OOM etc.) in a
+//      chat coroutine previously reached Android's UncaughtExceptionHandler and killed
+//      the process. Handler now logs and does not re-throw (Bug 2b fix).
+//   2. catch(e: Exception) widened to catch(e: Throwable) in sendMessage() — OOM and
+//      other Error subclasses bypassed the catch block entirely (Bug 2a fix).
+//   3. Safety timeout extracted into separate `timeoutJob` — previously the 120s delay
+//      lived inside the message-processing coroutine, creating overlapping timeout
+//      coroutines when messages were sent in quick succession. Each new sendMessage()
+//      cancels the prior timeout before starting a new one (Bug 2c fix).
+//   4. pendingUserMessageId tracks the Room ID of the current pending user message.
+//      observeMessages() only resets awaitingResponse when it detects an assistant
+//      message AFTER the pending user message — prevents email auto-reply notifications
+//      (ChatBridge.post) from prematurely resetting the UI and allowing message 2 to
+//      be sent before message 1's response arrives (Bug 2d fix).
+// v1.1: Gear icon → SettingsHubActivity, no drawer.
 class ChatActivity : AppCompatActivity() {
 
     companion object {
@@ -44,10 +63,18 @@ class ChatActivity : AppCompatActivity() {
             Manifest.permission.POST_NOTIFICATIONS
         )
         private const val PERMISSION_REQUEST_CODE  = 100
+        private const val TAG = "ChatActivity"
     }
 
-    // SupervisorJob — exceptions in one child coroutine don't cascade to others
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    // SupervisorJob — exceptions in one child coroutine don't cascade to others.
+    // CoroutineExceptionHandler — catches any Error that escapes the coroutine's own
+    // try/catch (e.g. OOM during Room I/O) and logs rather than killing the process.
+    private val scope = CoroutineScope(
+        Dispatchers.Main + SupervisorJob() +
+        CoroutineExceptionHandler { _, e ->
+            android.util.Log.e(TAG, "Scope error: ${e.javaClass.simpleName}: ${e.message}", e)
+        }
+    )
     private lateinit var db: ChatDatabase
     private val timeFormat = SimpleDateFormat("HH:mm", Locale.US)
 
@@ -62,6 +89,15 @@ class ChatActivity : AppCompatActivity() {
 
     // True while waiting for MessageEngine to post a response via ChatBridge
     private var awaitingResponse = false
+
+    // Room-inserted ID of the user message currently awaiting a response.
+    // Used by observeMessages() to detect the CORRECT response (not an unrelated
+    // email auto-reply notification). Reset to -1L when response arrives or timeout fires.
+    private var pendingUserMessageId: Long = -1L
+
+    // Safety timeout job — separate from the send coroutine so it can be cancelled
+    // when a new message is sent (prevents overlapping timeouts from prior messages).
+    private var timeoutJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         AigentikSettings.init(this)
@@ -147,14 +183,23 @@ class ChatActivity : AppCompatActivity() {
         etMessage.text.clear()
         btnSend.isEnabled = false
         awaitingResponse  = true
+        pendingUserMessageId = -1L
         showThinking("Thinking...")
+
+        // Cancel any leftover timeout from the previous message — prevents the prior
+        // message's 120s timer from firing mid-way through this message's response.
+        timeoutJob?.cancel()
+        timeoutJob = null
 
         scope.launch {
             try {
-                // Save user message
-                withContext(Dispatchers.IO) {
+                // Save user message and capture the auto-generated Room ID.
+                // pendingUserMessageId lets observeMessages distinguish the RESPONSE to
+                // THIS message from unrelated assistant messages (e.g. email notifications).
+                val insertedId = withContext(Dispatchers.IO) {
                     db.chatDao().insert(ChatMessage(role = "user", content = text))
                 }
+                pendingUserMessageId = insertedId
 
                 // Fast local commands — no service required
                 val local = resolveLocalCommand(text.lowercase().trim(), text)
@@ -163,6 +208,7 @@ class ChatActivity : AppCompatActivity() {
                         db.chatDao().insert(ChatMessage(role = "assistant", content = local))
                     }
                     awaitingResponse = false
+                    pendingUserMessageId = -1L
                     hideThinking()
                     btnSend.isEnabled = true
                     return@launch
@@ -181,23 +227,32 @@ class ChatActivity : AppCompatActivity() {
                 withContext(Dispatchers.IO) {
                     MessageEngine.onMessageReceived(msg)
                 }
+                // Response arrives asynchronously via observeMessages — this coroutine exits.
+                // The safety timeoutJob (below) re-enables UI if nothing arrives in 120s.
 
-                // Safety timeout — re-enable after 120s if chatNotifier never fires.
-                // Increased from 45s: generateChatReply() runs at up to 512 tokens
-                // which can take 25-60s on its own; 45s was too tight and fired mid-inference.
-                delay(120_000)
-                if (awaitingResponse) {
-                    awaitingResponse = false
-                    hideThinking()
-                    btnSend.isEnabled = true
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("ChatActivity", "sendMessage error: ${e.message}", e)
+            } catch (e: Throwable) {
+                // Widened from Exception to Throwable — OOM and other Error subclasses
+                // previously bypassed this catch entirely (Bug 2a fix).
+                android.util.Log.e(TAG, "sendMessage error: ${e.javaClass.simpleName}: ${e.message}", e)
                 withContext(Dispatchers.IO) {
                     db.chatDao().insert(ChatMessage(role = "assistant",
                         content = "Error: ${e.message?.take(120) ?: "unknown error"}"))
                 }
                 awaitingResponse = false
+                pendingUserMessageId = -1L
+                hideThinking()
+                btnSend.isEnabled = true
+            }
+        }
+
+        // Safety timeout — separate job so it can be cancelled by next sendMessage() call.
+        // Re-enables UI if chatNotifier never fires (e.g. service not running, Gmail API down).
+        // 120s: generateChatReply at 512 tokens takes 25-60s; this is a genuine safety net.
+        timeoutJob = scope.launch {
+            delay(120_000)
+            if (awaitingResponse) {
+                awaitingResponse = false
+                pendingUserMessageId = -1L
                 hideThinking()
                 btnSend.isEnabled = true
             }
@@ -213,12 +268,28 @@ class ChatActivity : AppCompatActivity() {
                 scrollToBottom()
                 updateModelStatus()
 
-                // When MessageEngine posts a response via ChatBridge, the last message
-                // will be role="assistant" — that's our signal to re-enable the UI
-                if (awaitingResponse && messages.lastOrNull()?.role == "assistant") {
-                    awaitingResponse = false
-                    hideThinking()
-                    btnSend.isEnabled = true
+                // Reset UI only when the response to the CURRENT pending user message arrives.
+                // If pendingUserMessageId is set, look for an assistant message that appears
+                // AFTER the pending user message in the list — this distinguishes a real reply
+                // from an unrelated email auto-reply notification (Bug 2d fix).
+                if (awaitingResponse) {
+                    val pendingId = pendingUserMessageId
+                    val shouldReset = if (pendingId > 0L) {
+                        val idx = messages.indexOfLast { it.id == pendingId }
+                        idx >= 0 && idx < messages.size - 1 &&
+                            messages.drop(idx + 1).any { it.role == "assistant" }
+                    } else {
+                        // Fallback when no pendingId tracked (e.g. local command path)
+                        messages.lastOrNull()?.role == "assistant"
+                    }
+                    if (shouldReset) {
+                        awaitingResponse = false
+                        pendingUserMessageId = -1L
+                        timeoutJob?.cancel()
+                        timeoutJob = null
+                        hideThinking()
+                        btnSend.isEnabled = true
+                    }
                 }
             }
         }
@@ -331,6 +402,7 @@ class ChatActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        timeoutJob?.cancel()
         scope.cancel()
     }
 }
